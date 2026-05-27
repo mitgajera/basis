@@ -60,6 +60,8 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
     require!(amount > 0, BasisError::ZeroAmount);
     require!(amount >= MIN_DEPOSIT, BasisError::BelowMinimum);
 
+    // Clone AccountInfo before the mutable borrow so the CPI can use it later
+    let vault_account_info = ctx.accounts.vault.to_account_info();
     let vault = &mut ctx.accounts.vault;
     require!(!vault.paused, BasisError::Paused);
 
@@ -101,7 +103,7 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
             MintTo {
                 mint: ctx.accounts.share_mint.to_account_info(),
                 to: ctx.accounts.user_share_account.to_account_info(),
-                authority: ctx.accounts.vault.to_account_info(),
+                authority: vault_account_info,
             },
             signer,
         ),
