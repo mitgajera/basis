@@ -1,3 +1,5 @@
+// Re-export VenueAdapter interface + associated types from shared where available;
+// these local definitions remain the authoritative source for keeper-internal use.
 export type Venue = "pacifica" | "phoenix" | "backpack" | "drift" | "jupiter";
 
 export interface FundingRateInfo {
@@ -41,18 +43,32 @@ export interface OrderResult {
 
 export interface VenueAdapter {
   readonly venue: Venue;
-
   getFundingRate(asset: string): Promise<FundingRateInfo>;
   getMarkPrice(asset: string): Promise<number>;
   getPositions(): Promise<Position[]>;
   getCollateralBalance(): Promise<number>;
   subscribeFunding(asset: string, cb: (info: FundingRateInfo) => void): () => void;
   subscribeMarkPrice(asset: string, cb: (price: number) => void): () => void;
-
   placeOrder(params: PlaceOrderParams): Promise<OrderResult>;
   closePosition(asset: string): Promise<OrderResult>;
-
   init(): Promise<void>;
   shutdown(): Promise<void>;
   health(): Promise<{ ok: boolean; latencyMs: number; reason?: string }>;
+}
+
+// ── factory ──────────────────────────────────────────────────────────────────
+
+import type { Config } from "../config";
+import { BackpackAdapter } from "./backpack";
+import { PhoenixAdapter } from "./phoenix";
+import { PacificaAdapter } from "./pacifica";
+
+/** Instantiate all enabled venue adapters from config. */
+export function createVenueAdapters(config: Config): VenueAdapter[] {
+  const adapters: VenueAdapter[] = [
+    new BackpackAdapter(config),
+    new PhoenixAdapter(config),
+    new PacificaAdapter(config),
+  ];
+  return adapters;
 }

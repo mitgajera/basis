@@ -27,8 +27,8 @@ async function main() {
   // Init venue adapters
   const venueList: VenueAdapter[] = [
     new BackpackAdapter(config),
-    config.USE_FALLBACK_VENUES ? new DriftAdapter() : new PacificaAdapter(),
-    config.USE_FALLBACK_VENUES ? new JupiterAdapter() : new PhoenixAdapter(),
+    config.USE_FALLBACK_VENUES ? new DriftAdapter() : new PacificaAdapter(config),
+    config.USE_FALLBACK_VENUES ? new JupiterAdapter() : new PhoenixAdapter(config),
   ];
 
   // Init adapters, skip those that throw (stub adapters)
