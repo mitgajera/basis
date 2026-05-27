@@ -1,14 +1,28 @@
+# Node
 node_modules/
-.env
-*.db
-*.db-journal
-dist/
 .next/
+dist/
+.turbo/
+
+# Anchor
 target/
-**/.anchor/
-test-ledger/
-*.log
-.DS_Store
-data/
-*.pem
+.anchor/
+
+# Env / secrets
+.env
+.env.local
 *.key
+*.pem
+*-keypair.json
+*keypair*.json
+
+# Data
+data/*.db
+data/*.db-journal
+
+# Build artifacts
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db

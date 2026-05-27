@@ -1,0 +1,19 @@
+{
+  "name": "basis",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @basis/shared build && pnpm --filter @basis/keeper build && pnpm --filter web build",
+    "dev": "pnpm --parallel --filter @basis/keeper dev & pnpm --filter web dev",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist .next && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "dotenv": "^16.4.5",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.4.0"
+  }
+}
