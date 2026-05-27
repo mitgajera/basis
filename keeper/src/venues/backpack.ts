@@ -14,6 +14,7 @@ import { normalizeToHourlyDecimal, hourlyToAnnualizedPct } from "../strategy/nor
 const BASE_URL = "https://api.backpack.exchange";
 const WS_URL = "wss://ws.backpack.exchange";
 const ASSET_SYMBOL = "SOL_USDC_PERP";
+const WINDOW = 5000;
 
 export class BackpackAdapter implements VenueAdapter {
   readonly venue: Venue = "backpack";
@@ -24,7 +25,6 @@ export class BackpackAdapter implements VenueAdapter {
   private fundingCallbacks = new Map<string, Set<(info: FundingRateInfo) => void>>();
   private markPriceCallbacks = new Map<string, Set<(price: number) => void>>();
   private latestFunding = new Map<string, FundingRateInfo>();
-  private initTime = 0;
 
   constructor(private config: Config) {
     this.apiKey = config.BACKPACK_API_KEY;
@@ -32,7 +32,6 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   async init(): Promise<void> {
-    this.initTime = Date.now();
     this._connectWs();
   }
 
@@ -55,7 +54,6 @@ export class BackpackAdapter implements VenueAdapter {
 
   async getFundingRate(asset: string): Promise<FundingRateInfo> {
     const symbol = this._toSymbol(asset);
-    // markPrices returns funding rate, mark/index price, and next funding timestamp in one call
     const res = await fetch(`${BASE_URL}/api/v1/markPrices?symbol=${symbol}`);
     if (!res.ok) throw new Error(`Backpack getFundingRate failed: ${res.status}`);
     const rows = (await res.json()) as Array<{
@@ -68,7 +66,7 @@ export class BackpackAdapter implements VenueAdapter {
     const data = rows[0];
     if (!data) throw new Error(`Backpack getFundingRate: no data for ${symbol}`);
 
-    // Backpack funding rate is in 8h_decimal format (three periods per day)
+    // Backpack funding rate is 8h_decimal (three periods per day)
     const hourlyRate = normalizeToHourlyDecimal(parseFloat(data.fundingRate), "8h_decimal");
     const info: FundingRateInfo = {
       venue: "backpack",
@@ -90,7 +88,7 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   async getPositions(): Promise<Position[]> {
-    const res = await this._signedGet("/api/v1/position");
+    const res = await this._signedGet("/api/v1/position", "positionQuery");
     if (!res.ok) throw new Error(`Backpack getPositions failed: ${res.status}`);
     const data = (await res.json()) as Array<{
       symbol: string;
@@ -117,7 +115,7 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   async getCollateralBalance(): Promise<number> {
-    const res = await this._signedGet("/api/v1/capital");
+    const res = await this._signedGet("/api/v1/capital", "balanceQuery");
     if (!res.ok) throw new Error(`Backpack getCollateralBalance failed: ${res.status}`);
     const data = (await res.json()) as Array<{ symbol: string; available: string }>;
     const usdc = data.find((b) => b.symbol === "USDC");
@@ -127,10 +125,8 @@ export class BackpackAdapter implements VenueAdapter {
   subscribeFunding(asset: string, cb: (info: FundingRateInfo) => void): () => void {
     if (!this.fundingCallbacks.has(asset)) this.fundingCallbacks.set(asset, new Set());
     this.fundingCallbacks.get(asset)!.add(cb);
-
     const latest = this.latestFunding.get(asset);
     if (latest) cb(latest);
-
     return () => this.fundingCallbacks.get(asset)?.delete(cb);
   }
 
@@ -141,16 +137,16 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   async placeOrder(params: PlaceOrderParams): Promise<OrderResult> {
-    const body = {
-      symbol: this._toSymbol(params.asset),
-      side: params.side === "long" ? "Bid" : "Ask",
+    const bodyParams: Record<string, string> = {
       orderType: params.type === "market" ? "Market" : "Limit",
       quantity: String(params.sizeUsd),
-      price: params.limitPrice != null ? String(params.limitPrice) : undefined,
-      reduceOnly: params.reduceOnly ?? false,
+      side: params.side === "long" ? "Bid" : "Ask",
+      symbol: this._toSymbol(params.asset),
     };
+    if (params.limitPrice != null) bodyParams["price"] = String(params.limitPrice);
+    if (params.reduceOnly) bodyParams["reduceOnly"] = "true";
 
-    const res = await this._signedPost("/api/v1/order", body);
+    const res = await this._signedPost("/api/v1/order", bodyParams, "orderExecute");
     if (!res.ok) throw new Error(`Backpack placeOrder failed: ${res.status} ${await res.text()}`);
     const data = (await res.json()) as {
       id: string;
@@ -172,13 +168,7 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   async closePosition(asset: string): Promise<OrderResult> {
-    return this.placeOrder({
-      asset,
-      side: "short",
-      sizeUsd: 0,
-      type: "market",
-      reduceOnly: true,
-    });
+    return this.placeOrder({ asset, side: "short", sizeUsd: 0, type: "market", reduceOnly: true });
   }
 
   // ── private helpers ──────────────────────────────────────────────────────
@@ -189,39 +179,60 @@ export class BackpackAdapter implements VenueAdapter {
   }
 
   private _fromSymbol(symbol: string): string {
-    return symbol.replace(/_USDC/, "-").replace(/_PERP/, "-PERP");
+    return symbol.replace("_USDC_PERP", "-PERP").replace(/_USDC/, "-").replace(/_PERP$/, "-PERP");
   }
 
-  private _sign(method: string, path: string, timestamp: number, body: string): string {
-    const message = `${method}\n${path}\n${timestamp}\n${body}`;
-    return crypto.createHmac("sha256", this.apiSecret).update(message).digest("base64");
+  /** Sign with ED25519. Message = "instruction=<name>&<sorted_params>&timestamp=<ts>&window=<window>" */
+  private _sign(message: string): string {
+    const seed = Buffer.from(this.apiSecret, "base64");
+    // PKCS8 DER wrapper for Ed25519 (RFC 8410)
+    const der = Buffer.concat([
+      Buffer.from("302e020100300506032b657004220420", "hex"),
+      seed,
+    ]);
+    const privateKey = crypto.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+    const sig = crypto.sign(null, Buffer.from(message, "utf8"), privateKey);
+    return sig.toString("base64");
   }
 
-  private async _signedGet(path: string): Promise<Response> {
+  private async _signedGet(path: string, instruction: string, queryParams: Record<string, string> = {}): Promise<Response> {
     const timestamp = Date.now();
-    const sig = this._sign("GET", path, timestamp, "");
-    return fetch(`${BASE_URL}${path}`, {
+    const sorted = Object.entries(queryParams).sort(([a], [b]) => a.localeCompare(b));
+    const paramStr = sorted.length > 0 ? sorted.map(([k, v]) => `${k}=${v}`).join("&") + "&" : "";
+    const message = `instruction=${instruction}&${paramStr}timestamp=${timestamp}&window=${WINDOW}`;
+    const sig = this._sign(message);
+
+    const url = sorted.length > 0
+      ? `${BASE_URL}${path}?${sorted.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")}`
+      : `${BASE_URL}${path}`;
+
+    return fetch(url, {
       headers: {
         "X-API-Key": this.apiKey,
         "X-Timestamp": String(timestamp),
+        "X-Window": String(WINDOW),
         "X-Signature": sig,
       },
     });
   }
 
-  private async _signedPost(path: string, body: unknown): Promise<Response> {
+  private async _signedPost(path: string, bodyParams: Record<string, string>, instruction: string): Promise<Response> {
     const timestamp = Date.now();
-    const bodyStr = JSON.stringify(body);
-    const sig = this._sign("POST", path, timestamp, bodyStr);
+    const sorted = Object.entries(bodyParams).sort(([a], [b]) => a.localeCompare(b));
+    const paramStr = sorted.map(([k, v]) => `${k}=${v}`).join("&");
+    const message = `instruction=${instruction}&${paramStr}&timestamp=${timestamp}&window=${WINDOW}`;
+    const sig = this._sign(message);
+
     return fetch(`${BASE_URL}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
         "X-Timestamp": String(timestamp),
+        "X-Window": String(WINDOW),
         "X-Signature": sig,
       },
-      body: bodyStr,
+      body: JSON.stringify(Object.fromEntries(sorted)),
     });
   }
 
@@ -246,7 +257,6 @@ export class BackpackAdapter implements VenueAdapter {
     });
 
     ws.on("close", () => {
-      // reconnect after 5s
       setTimeout(() => this._connectWs(), 5000);
     });
 
