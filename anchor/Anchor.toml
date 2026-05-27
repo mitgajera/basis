@@ -1,15 +1,17 @@
+[toolchain]
+
 [features]
 resolution = true
 skip-lint = false
 
 [programs.devnet]
-basis_vault = "11111111111111111111111111111111"
+basis_vault = "GLfySZNLkrDGLmckY1vpFEiXxHToMJzPtCWQcx4wDgbS"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

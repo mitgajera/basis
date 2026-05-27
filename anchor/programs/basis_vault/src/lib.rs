@@ -6,7 +6,7 @@ pub mod instructions;
 
 use instructions::*;
 
-declare_id!("11111111111111111111111111111111");
+declare_id!("GLfySZNLkrDGLmckY1vpFEiXxHToMJzPtCWQcx4wDgbS");
 
 #[program]
 pub mod basis_vault {
