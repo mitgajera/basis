@@ -11,7 +11,7 @@ pub struct Initialize<'info> {
         init,
         payer = admin,
         space = Vault::LEN,
-        seeds = [VAULT_SEED],
+        seeds = [VAULT_SEED, usdc_mint.key().as_ref()],
         bump,
     )]
     pub vault: Account<'info, Vault>,

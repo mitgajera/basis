@@ -10,7 +10,7 @@ pub struct Withdraw<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED],
+        seeds = [VAULT_SEED, vault.usdc_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, Vault>,
@@ -87,7 +87,8 @@ pub fn handler(ctx: Context<Withdraw>, shares: u64) -> Result<()> {
 
     // Transfer USDC from vault to user (vault PDA signs)
     let vault_bump = vault.bump;
-    let seeds: &[&[u8]] = &[VAULT_SEED, &[vault_bump]];
+    let usdc_mint_bytes = vault.usdc_mint.to_bytes();
+    let seeds: &[&[u8]] = &[VAULT_SEED, usdc_mint_bytes.as_ref(), &[vault_bump]];
     let signer = &[seeds];
 
     token::transfer(

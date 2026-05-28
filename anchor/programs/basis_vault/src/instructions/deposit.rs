@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer};
 use crate::errors::BasisError;
 use crate::state::{UserPosition, Vault, MIN_DEPOSIT, USER_POSITION_SEED, VAULT_SEED};
@@ -10,7 +11,7 @@ pub struct Deposit<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED],
+        seeds = [VAULT_SEED, vault.usdc_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, Vault>,
@@ -43,25 +44,27 @@ pub struct Deposit<'info> {
     )]
     pub share_mint: Account<'info, Mint>,
 
+    // ATA — no keypair signer required; derived from (user, share_mint)
     #[account(
         init_if_needed,
         payer = user,
-        token::mint = share_mint,
-        token::authority = user,
+        associated_token::mint = share_mint,
+        associated_token::authority = user,
     )]
     pub user_share_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
 pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
     require!(amount > 0, BasisError::ZeroAmount);
     require!(amount >= MIN_DEPOSIT, BasisError::BelowMinimum);
 
-    // Clone AccountInfo before the mutable borrow so the CPI can use it later
+    // Snapshot fields needed for CPI signer before mutable borrow
     let vault_account_info = ctx.accounts.vault.to_account_info();
+    let usdc_mint_bytes = ctx.accounts.vault.usdc_mint.to_bytes();
     let vault = &mut ctx.accounts.vault;
     require!(!vault.paused, BasisError::Paused);
 
@@ -94,7 +97,7 @@ pub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {
 
     // Mint share tokens to user
     let vault_bump = vault.bump;
-    let seeds: &[&[u8]] = &[VAULT_SEED, &[vault_bump]];
+    let seeds: &[&[u8]] = &[VAULT_SEED, usdc_mint_bytes.as_ref(), &[vault_bump]];
     let signer = &[seeds];
 
     token::mint_to(

@@ -8,7 +8,7 @@ pub struct UpdateNav<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED],
+        seeds = [VAULT_SEED, vault.usdc_mint.as_ref()],
         bump = vault.bump,
         constraint = vault.keeper == keeper.key() @ BasisError::NotKeeper,
     )]

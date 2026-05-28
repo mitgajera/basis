@@ -8,7 +8,7 @@ pub struct PauseVault<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED],
+        seeds = [VAULT_SEED, vault.usdc_mint.as_ref()],
         bump = vault.bump,
         constraint = vault.authority == admin.key() @ BasisError::NotAdmin,
     )]
