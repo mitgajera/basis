@@ -15,6 +15,7 @@ import { SimulatedExecutor } from "./executor/simulated-executor";
 import { rankOpportunity, DEFAULT_RANKER_CONFIG } from "./strategy/ranker";
 import { sizePosition, DEFAULT_SIZER_CONFIG } from "./strategy/sizer";
 import { createApi } from "./api/server";
+import { computeNav } from "./vault/compute-nav";
 import { navPerShare } from "@basis/shared";
 import { STRATEGY, VAULT, RISK } from "@basis/shared";
 
@@ -145,11 +146,27 @@ async function main() {
   // NAV update loop
   setInterval(async () => {
     try {
-      const snapshot = await vault.getSnapshot();
-      const simPnl = executor.openPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
-      const totalAssets = snapshot.tvl + simPnl;
-      const nav = navPerShare(totalAssets, snapshot.totalShares);
-      logger.logNav({ totalAssetsUsd: totalAssets, totalShares: snapshot.totalShares, navPerShare: nav });
+      const breakdown = await computeNav(vault, adapters, executor.openPositions);
+      const totalAssetsUsd = breakdown.total;
+
+      // Guard: skip update if delta > 4% of last known TVL (likely bad data)
+      const lastSnapshot = await vault.getSnapshot();
+      const lastTvl = lastSnapshot.tvl || totalAssetsUsd;
+      const deltaPct = lastTvl > 0 ? Math.abs(totalAssetsUsd - lastTvl) / lastTvl : 0;
+      if (deltaPct > 0.04 && lastTvl > 0) {
+        log.warn({ deltaPct: (deltaPct * 100).toFixed(2), totalAssetsUsd, lastTvl }, "NAV delta >4% — skipping on-chain update");
+        logger.logEvent("high", "nav_delta_guard_triggered", { deltaPct, totalAssetsUsd, lastTvl });
+        return;
+      }
+
+      const totalSharesRaw = lastSnapshot.totalShares;
+      const nav = navPerShare(totalAssetsUsd, totalSharesRaw / 1_000_000);
+      logger.logNav({ totalAssetsUsd, totalShares: totalSharesRaw / 1_000_000, navPerShare: nav });
+
+      // Push to on-chain vault (no-op if VAULT_PROGRAM_ID not set or IDL not built)
+      await vault.updateNav(totalAssetsUsd);
+
+      log.debug({ vaultUsdc: breakdown.vaultUsdc, venueCollateral: breakdown.venueCollateral, unrealizedPnl: breakdown.unrealizedPnl, nav: nav.toFixed(6) }, "NAV updated");
     } catch (e) {
       logger.logEvent("error", "nav_update_failed", e);
     }
