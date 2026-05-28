@@ -48,8 +48,11 @@ export function sizePosition(
     budgetCap,
   );
 
+  // Kelly fraction: expected return per dollar held for the persistence window,
+  // clamped to kellyMaxFraction. Using spread/100/365*168h avoids the score/TVL
+  // normalization which collapses to near-zero for realistic spread magnitudes.
   const kellyFraction = Math.min(
-    Math.max(opp.score / ctx.vaultTvl, 0),
+    Math.max(opp.spreadAnnualizedPct / 200, 0),
     config.kellyMaxFraction,
   );
 

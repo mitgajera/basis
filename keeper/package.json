@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "print-spreads": "tsx src/scripts/print-spreads.ts",
     "test:backpack": "tsx src/venues/backpack.test.ts",
+    "test:ranker": "tsx src/strategy/ranker.test.ts",
+    "test:sizer": "tsx src/strategy/sizer.test.ts",
     "backtest": "tsx src/scripts/backtest.ts",
     "deploy-vault": "tsx src/scripts/deploy-vault.ts"
   },

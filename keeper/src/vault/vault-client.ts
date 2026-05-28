@@ -8,13 +8,13 @@ export class VaultClient {
 
   async getSnapshot(): Promise<VaultSnapshot> {
     if (!this.config.VAULT_PROGRAM_ID) {
-      // Return a zero-state snapshot before vault is deployed
-      return { tvl: 0, totalShares: 0, navPerShare: 1, lastUpdated: Date.now() };
+      const tvl = parseFloat(process.env["VAULT_TVL_USD"] ?? "1000");
+      return { tvl, totalShares: tvl, navPerShare: 1, lastUpdated: Date.now() };
     }
     throw new Error("VaultClient.getSnapshot not yet implemented; deploy anchor program first");
   }
 
-  async updateNav(totalAssetsUsd: number): Promise<void> {
+  async updateNav(_totalAssetsUsd: number): Promise<void> {
     if (!this.config.VAULT_PROGRAM_ID) return;
     throw new Error("VaultClient.updateNav not yet implemented; deploy anchor program first");
   }

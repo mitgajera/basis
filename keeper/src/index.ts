@@ -77,7 +77,7 @@ async function main() {
       }
 
       const riskCtx = {
-        vaultTvl: snapshot.tvl || 200,
+        vaultTvl: snapshot.tvl || 1000,
         navHistory,
         positions: executor.openPositions,
         venueHealth: venueHealthMap as Record<Venue, { ok: boolean; lastSeen: number }>,
