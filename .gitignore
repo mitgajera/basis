@@ -17,8 +17,8 @@ target/
 *keypair*.json
 
 # Data
-data/*.db
-data/*.db-journal
+data/
+keeper/data/
 
 # Build artifacts
 *.tsbuildinfo
