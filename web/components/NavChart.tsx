@@ -3,23 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useNav } from "../lib/api-client";
 
-const RANGES = ["24h", "7d", "30d", "All"] as const;
+const RANGES = ["5m","24h", "7d", "All"] as const;
 type Range = (typeof RANGES)[number];
 
 export function NavChart() {
   const chartRef = useRef<HTMLDivElement>(null);
   const { data } = useNav();
   const [range, setRange] = useState<Range>("7d");
+  const [ready, setReady] = useState(false);
   const chartInstance = useRef<unknown>(null);
   const areaSeriesRef = useRef<unknown>(null);
 
   const history: Array<{ timestamp: number; navPerShare: number }> = data?.history ?? [];
-  const current: number = data?.snapshot?.nav_per_share ?? 1;
+  const current: number = data?.snapshot?.navPerShare ?? data?.snapshot?.nav_per_share ?? 1;
 
   const delta = (ms: number) => {
     const cutoff = Date.now() - ms;
-    const oldest = history.find((h) => h.timestamp >= cutoff);
-    if (!oldest || oldest.navPerShare === 0) return null;
+    // Use the first SANE baseline (NAV is yield-only, always ~1.0+; ignore bad reads)
+    const oldest = history.find((h) => h.timestamp >= cutoff && h.navPerShare >= 0.5);
+    if (!oldest) return null;
     return ((current - oldest.navPerShare) / oldest.navPerShare) * 100;
   };
   const d24h = delta(24 * 3600_000);
@@ -27,10 +29,10 @@ export function NavChart() {
 
   useEffect(() => {
     if (!chartRef.current) return;
-    let chart: { remove(): void };
+    let destroyed = false;
     import("lightweight-charts").then(({ createChart, ColorType, CrosshairMode, LineStyle }) => {
-      if (!chartRef.current) return;
-      chart = createChart(chartRef.current, {
+      if (destroyed || !chartRef.current) return;
+      const chart = createChart(chartRef.current, {
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
           textColor: "#44445A",
@@ -72,11 +74,33 @@ export function NavChart() {
         crosshairMarkerRadius: 4,
         crosshairMarkerBorderColor: "#00DDB8",
         crosshairMarkerBackgroundColor: "#12121E",
+        // Enforce a minimum y-span (±0.5%) so micro NAV moves don't get
+        // stretched to full height by autoscale and look dramatic.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        autoscaleInfoProvider: (orig: () => any) => {
+          const res = orig();
+          if (!res?.priceRange) return res;
+          const { minValue, maxValue } = res.priceRange;
+          const mid = (minValue + maxValue) / 2;
+          const half = Math.max((maxValue - minValue) / 2, 0.005); // ≥1% total band
+          return { ...res, priceRange: { minValue: mid - half, maxValue: mid + half } };
+        },
       });
       areaSeriesRef.current = areaSeries;
       chartInstance.current = chart;
+      setReady(true);
     });
+
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && chartInstance.current) (chartInstance.current as { applyOptions(o: unknown): void }).applyOptions({ width: Math.floor(w) });
+    });
+    if (chartRef.current) ro.observe(chartRef.current);
+
     return () => {
+      destroyed = true;
+      ro.disconnect();
+      setReady(false);
       if (chartInstance.current) {
         (chartInstance.current as { remove(): void }).remove();
         chartInstance.current = null;
@@ -86,12 +110,28 @@ export function NavChart() {
   }, []);
 
   useEffect(() => {
-    if (!areaSeriesRef.current || history.length === 0) return;
+    if (!areaSeriesRef.current) return;
     const series = areaSeriesRef.current as { setData(d: Array<{ time: number; value: number }>): void };
-    const cutoffMs = range === "All" ? 0 : range === "30d" ? Date.now() - 30 * 24 * 3600_000 : range === "7d" ? Date.now() - 7 * 24 * 3600_000 : Date.now() - 24 * 3600_000;
-    const sorted = [...history].filter((h) => h.timestamp >= cutoffMs).sort((a, b) => a.timestamp - b.timestamp).map((h) => ({ time: Math.floor(h.timestamp / 1000), value: h.navPerShare }));
+    const cutoffMs = range === "All" ? 0 : range === "7d" ? Date.now() - 24 * 7 * 24 * 3600_000 : range === "5m" ? Date.now() - 5 *5 * 60_000 : Date.now() - 24 * 3600_000;
+    let sorted = [...history]
+      .filter((h) => h.timestamp >= cutoffMs && h.navPerShare >= 0.5 && Number.isFinite(h.navPerShare))
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((h) => ({ time: Math.floor(h.timestamp / 1000), value: h.navPerShare }));
+
+    // Dedupe identical timestamps (lightweight-charts requires strictly increasing time)
+    sorted = Array.from(new Map(sorted.map((p) => [p.time, p])).values());
+
+    // Ensure a visible baseline even when the vault has no NAV history yet
+    if (sorted.length === 0) {
+      const now = Math.floor(Date.now() / 1000);
+      sorted = [{ time: now - 3600, value: 1 }, { time: now, value: 1 }];
+    } else if (sorted.length === 1) {
+      sorted = [{ time: sorted[0]!.time - 60, value: sorted[0]!.value }, ...sorted];
+    }
+
     series.setData(sorted);
-  }, [history, range]);
+    (chartInstance.current as { timeScale(): { fitContent(): void } } | null)?.timeScale().fitContent();
+  }, [history, range, ready]);
 
   return (
     <div className="glass-card rounded-xl overflow-hidden">

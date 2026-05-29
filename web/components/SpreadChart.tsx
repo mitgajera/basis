@@ -7,7 +7,7 @@ import type { Asset } from "./FundingSection";
 const PAIR_COLORS = ["#00DDB8", "#F97316", "#5B9CF6", "#A78BFA", "#E879A0", "#EAB308"];
 
 type SpreadPoint = { longVenue: string; shortVenue: string; spreadAnnualizedPct: number; computedAt?: number };
-type ChartApi = { addLineSeries(o: unknown): SeriesApi; removeSeries(s: unknown): void; timeScale(): { fitContent(): void }; remove(): void };
+type ChartApi = { addLineSeries(o: unknown): SeriesApi; removeSeries(s: unknown): void; timeScale(): { fitContent(): void }; applyOptions(o: unknown): void; remove(): void };
 type SeriesApi = { setData(d: { time: number; value: number }[]): void };
 
 const CHART_H = 158;
@@ -47,8 +47,16 @@ export function SpreadChart({ asset }: { asset: Asset }) {
         height: CHART_H,
       }) as ChartApi;
     });
+
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && chartApi.current) chartApi.current.applyOptions({ width: Math.floor(w) });
+    });
+    ro.observe(chartRef.current);
+
     return () => {
       destroyed = true;
+      ro.disconnect();
       if (chartApi.current) { chartApi.current.remove(); chartApi.current = null; seriesMap.current.clear(); }
     };
   }, []);
@@ -62,7 +70,9 @@ export function SpreadChart({ asset }: { asset: Asset }) {
     const allPts: SpreadPoint[] = [...(history ?? []), ...(live ?? [])];
     const byPair = new Map<string, { time: number; value: number }[]>();
     for (const p of allPts) {
-      const key = `${p.longVenue}↔${p.shortVenue}`;
+      // Drop transient outliers that would blow up the y-axis scale
+      if (!Number.isFinite(p.spreadAnnualizedPct) || Math.abs(p.spreadAnnualizedPct) > 150) continue;
+      const key = `${p.longVenue}<>${p.shortVenue}`;
       if (!byPair.has(key)) byPair.set(key, []);
       byPair.get(key)!.push({ time: Math.floor((p.computedAt ?? Date.now()) / 1000), value: p.spreadAnnualizedPct });
     }
@@ -74,12 +84,11 @@ export function SpreadChart({ asset }: { asset: Asset }) {
       const color = PAIR_COLORS[ci++ % PAIR_COLORS.length]!;
       const s = chart.addLineSeries({
         color, lineWidth: 2, lineType: 2,
-        priceFormat: { type: "custom" as never, formatter: (v: number) => v.toFixed(2) + "%" },
-        lastValueVisible: true, priceLineVisible: false,
+        priceFormat: { type: "custom" as never, formatter: (v: number) => v.toFixed(1) + "%" },
+        lastValueVisible: false, priceLineVisible: false,
         crosshairMarkerVisible: true, crosshairMarkerRadius: 4,
         crosshairMarkerBorderColor: color,
         crosshairMarkerBackgroundColor: "#0C0C16",
-        title: key,
       });
       s.setData(points);
       seriesMap.current.set(key, s);
@@ -89,7 +98,7 @@ export function SpreadChart({ asset }: { asset: Asset }) {
   }, [history, live]);
 
   const pairs = (live as SpreadPoint[] | undefined)
-    ?.map((s) => ({ key: `${s.longVenue}↔${s.shortVenue}`, pct: s.spreadAnnualizedPct })) ?? [];
+    ?.map((s) => ({ key: `${s.longVenue}<>${s.shortVenue}`, pct: s.spreadAnnualizedPct })) ?? [];
 
   return (
     <div className="glass-card rounded-xl overflow-hidden">

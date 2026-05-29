@@ -14,9 +14,9 @@ const VENUE_COLORS: Record<string, string> = {
 };
 
 const LOOKBACKS = [
+  { label: "5m", ms: 5 * 60_000 },
   { label: "15m", ms: 15 * 60_000 },
   { label: "1h",  ms: 60 * 60_000 },
-  { label: "6h",  ms: 6  * 3600_000 },
   { label: "24h", ms: 24 * 3600_000 },
   { label: "7d",  ms: 7  * 24 * 3600_000 },
 ];
@@ -27,6 +27,7 @@ type ChartApi = {
   addLineSeries(o: unknown): SeriesApi;
   removeSeries(s: unknown): void;
   timeScale(): { fitContent(): void };
+  applyOptions(o: unknown): void;
   remove(): void;
 };
 type SeriesApi = { setData(d: { time: number; value: number }[]): void };
@@ -81,8 +82,15 @@ export function FundingChart({ asset }: { asset: Asset }) {
         height: CHART_H,
       }) as ChartApi;
     });
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && chartApi.current) chartApi.current.applyOptions({ width: Math.floor(w) });
+    });
+    ro.observe(chartRef.current);
+
     return () => {
       destroyed = true;
+      ro.disconnect();
       if (chartApi.current) { chartApi.current.remove(); chartApi.current = null; seriesMap.current.clear(); }
     };
   }, []);
@@ -125,21 +133,39 @@ export function FundingChart({ asset }: { asset: Asset }) {
         seriesMap.current.set(venue, s);
       }
     } else {
-      const tradeList: Array<{ opened_at: number; pnl_cumulative?: number }> = trades ?? [];
-      const pnlPts = tradeList
-        .filter((t) => t.pnl_cumulative != null && Math.floor(t.opened_at / 1000) >= cutoff)
-        .map((t) => ({ time: Math.floor(t.opened_at / 1000), value: t.pnl_cumulative! }))
+      // Build a cumulative realized-PnL line from closed trade legs
+      type Tr = { openedAt: number; closedAt: number | null; pnlUsd: number | null };
+      const closed = ((trades as Tr[]) ?? [])
+        .filter((t) => t.pnlUsd != null && Number.isFinite(t.pnlUsd))
+        .map((t) => ({ time: Math.floor((t.closedAt ?? t.openedAt) / 1000), pnl: t.pnlUsd! }))
+        .filter((t) => t.time >= cutoff)
         .sort((a, b) => a.time - b.time);
+
+      let cum = 0;
+      const raw = closed.map((c) => { cum += c.pnl; return { time: c.time, value: cum }; });
+      // Collapse identical timestamps to the latest cumulative value (strictly increasing time)
+      let pnlPts = Array.from(new Map(raw.map((p) => [p.time, p])).values());
+
+      // Flat $0 baseline when nothing has settled yet
+      if (pnlPts.length === 0) {
+        const now = Math.floor(Date.now() / 1000);
+        pnlPts = [{ time: now - 3600, value: 0 }, { time: now, value: 0 }];
+      } else if (pnlPts.length === 1) {
+        pnlPts = [{ time: pnlPts[0]!.time - 60, value: 0 }, ...pnlPts];
+      }
+
+      const lastVal = pnlPts[pnlPts.length - 1]!.value;
+      const color = lastVal >= 0 ? "#1EC996" : "#FF5252";
       const s = chart.addLineSeries({
-        color: "#00DDB8",
+        color,
         lineWidth: 2,
         lineType: 2,
-        priceFormat: { type: "custom" as never, formatter: (v: number) => `$${v.toFixed(2)}` },
+        priceFormat: { type: "custom" as never, formatter: (v: number) => `${v >= 0 ? "+" : ""}$${v.toFixed(4)}` },
         lastValueVisible: true,
         priceLineVisible: false,
         crosshairMarkerVisible: true,
         crosshairMarkerRadius: 4,
-        crosshairMarkerBorderColor: "#00DDB8",
+        crosshairMarkerBorderColor: color,
         crosshairMarkerBackgroundColor: "#0C0C16",
       });
       s.setData(pnlPts);
