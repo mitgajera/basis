@@ -5,6 +5,8 @@ import { useFundingRates } from "../lib/api-client";
 import { VenueLogo } from "./VenueLogo";
 import type { Asset } from "./FundingSection";
 
+const STALE_MS = 60_000; // a venue feed older than this is shown as stale
+
 const VENUE_COLOR: Record<string, string> = {
   backpack:    "var(--venue-backpack)",
   pacifica:    "var(--venue-pacifica)",
@@ -183,10 +185,11 @@ export function FundingRateTable({ asset }: { asset: Asset }) {
             {rows.map((row, idx) => {
               const color = VENUE_COLOR[row.venue.toLowerCase()] ?? "#52525B";
               const isLast = idx === rows.length - 1;
+              const stale = row.lastUpdated != null && Date.now() - row.lastUpdated > STALE_MS;
               return (
                 <tr
                   key={row.venue}
-                  className={`group transition-colors duration-100 hover:bg-bg-surface-2 ${!isLast ? "border-b border-border-subtle/30" : ""}`}
+                  className={`group transition-colors duration-100 hover:bg-bg-surface-2 ${!isLast ? "border-b border-border-subtle/30" : ""} ${stale ? "opacity-40" : ""}`}
                 >
                   {/* Venue */}
                   <td className="py-2.5 px-3">
@@ -196,6 +199,11 @@ export function FundingRateTable({ asset }: { asset: Asset }) {
                       <span className="text-[12px] capitalize font-medium tracking-tight" style={{ color }}>
                         {row.venue}
                       </span>
+                      {stale && (
+                        <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-warning/15 text-warning font-medium">
+                          stale
+                        </span>
+                      )}
                     </div>
                   </td>
                   <RateCell value={row.hourlyRate} />
