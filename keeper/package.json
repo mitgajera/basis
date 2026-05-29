@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npx kill-port 3001 || true",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
@@ -12,7 +13,8 @@
     "test:ranker": "tsx src/strategy/ranker.test.ts",
     "test:sizer": "tsx src/strategy/sizer.test.ts",
     "backtest": "tsx src/scripts/backtest.ts",
-    "deploy-vault": "tsx src/scripts/deploy-vault.ts"
+    "deploy-vault": "tsx src/scripts/deploy-vault.ts",
+    "init-vault": "tsx src/scripts/init-vault.ts"
   },
   "dependencies": {
     "@basis/shared": "workspace:*",
