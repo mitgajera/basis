@@ -133,20 +133,22 @@ export function createApi(
       const snapshot = await vault.getSnapshot();
       const navHistory = logger.getNavHistory(7 * 24 * 3600_000);
 
-      // Annualize by ACTUAL elapsed time between the window's first and last point.
-      // Require a minimum window (≥1h) so tiny samples don't produce absurd APRs,
-      // and cap the result so a transient blip can't display nonsense.
-      const MIN_WINDOW_MS = 15 * 60_000;     // need ≥15m of data
-      const APR_CAP = 100;                    // clamp display to ±100%
+      // Annualize NAV growth, but dampen short windows: divide by at least
+      // ANNUALIZE_FLOOR_MS so a 2-minute sample isn't multiplied ~260,000× into
+      // nonsense. Early on the figure is conservative; it converges to the true
+      // APR as real elapsed time exceeds the floor. Capped for safety.
+      const ANNUALIZE_FLOOR_MS = 60 * 60_000; // treat windows shorter than 1h as 1h
+      const YEAR_MS = 365 * 24 * 3600_000;
+      const APR_CAP = 50;                      // clamp display to ±50%
       const computeApr = (windowMs: number): number | null => {
         const cutoff = Date.now() - windowMs;
-        const pts = navHistory.filter((p) => p.timestamp >= cutoff && p.navPerShare > 0);
+        const pts = navHistory.filter((p) => p.timestamp >= cutoff && p.navPerShare >= 0.5);
         if (pts.length < 2) return null;
         const first = pts[0]!, last = pts[pts.length - 1]!;
         const elapsedMs = last.timestamp - first.timestamp;
-        if (elapsedMs < MIN_WINDOW_MS) return null;
+        if (elapsedMs <= 0) return null;
         const growth = last.navPerShare / first.navPerShare - 1;
-        const apr = (growth / elapsedMs) * (365 * 24 * 3600_000) * 100;
+        const apr = (growth / Math.max(elapsedMs, ANNUALIZE_FLOOR_MS)) * YEAR_MS * 100;
         return Math.max(-APR_CAP, Math.min(APR_CAP, apr));
       };
 
