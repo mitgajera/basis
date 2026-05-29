@@ -26,6 +26,28 @@ export class SimulatedExecutor {
     return [...this.positions];
   }
 
+  /** Restore the in-memory position book from open trades persisted in the DB (survives keeper restarts). */
+  rehydrate(openTrades: Array<{
+    opportunityId: string; venue: string; asset: string; side: string;
+    sizeUsd: number; sizeBase: number; fillPrice: number; openedAt: number;
+  }>): void {
+    this.positions = openTrades.map((t) => ({
+      opportunityId: t.opportunityId,
+      venue: t.venue as Venue,
+      asset: t.asset,
+      side: t.side === "long" ? "long" : "short",
+      size: t.sizeBase,
+      notionalUsd: t.sizeUsd,
+      entryPrice: t.fillPrice,
+      unrealizedPnl: 0, // accrued PnL is recomputed from funding going forward
+      marginRatio: 1,
+      openedAt: t.openedAt,
+    }));
+    if (this.positions.length > 0) {
+      log.info({ count: this.positions.length }, "[SIM] rehydrated open positions from DB");
+    }
+  }
+
   async openSpread(opp: RankedOpportunity, sizeUsd: number): Promise<void> {
     const opportunityId = uuidv4();
     const now = Date.now();
@@ -64,6 +86,23 @@ export class SimulatedExecutor {
 
     this.positions.push(longPos, shortPos);
 
+    const entryFeeUsd = (sizeUsd * (FEES_DEFAULTS.feesInBps + FEES_DEFAULTS.slippageBps)) / 10_000;
+    for (const pos of [longPos, shortPos]) {
+      this.logger.logTrade({
+        opportunityId,
+        venue: pos.venue,
+        asset: pos.asset,
+        side: pos.side,
+        sizeUsd: pos.notionalUsd,
+        sizeBase: pos.size,
+        fillPrice: pos.entryPrice,
+        feeUsd: entryFeeUsd / 2,
+        orderId: `sim-${opportunityId.slice(0, 8)}`,
+        status: "open",
+        openedAt: now,
+      });
+    }
+
     log.info(
       {
         opportunityId,
@@ -74,13 +113,6 @@ export class SimulatedExecutor {
       },
       "[SIM] opened spread",
     );
-
-    this.logger.logEvent("info", "sim_open_spread", {
-      opportunityId,
-      longVenue: opp.longVenue,
-      shortVenue: opp.shortVenue,
-      sizeUsd,
-    });
   }
 
   updateUnrealizedPnl(
@@ -103,8 +135,9 @@ export class SimulatedExecutor {
     for (const pos of toClose) {
       const exitCost = pos.notionalUsd * exitFee;
       const realizedPnl = pos.unrealizedPnl - exitCost;
+      const exitPrice = await this.adapters.get(pos.venue)?.getMarkPrice(pos.asset).catch(() => pos.entryPrice) ?? pos.entryPrice;
+      this.logger.closeTrade(opportunityId, pos.venue, pos.side, exitPrice, realizedPnl);
       log.info({ opportunityId, venue: pos.venue, side: pos.side, realizedPnl: realizedPnl.toFixed(4) }, "[SIM] closed leg");
-      this.logger.logEvent("info", "sim_close_leg", { opportunityId, venue: pos.venue, side: pos.side, realizedPnl });
     }
 
     this.positions = this.positions.filter((p) => p.opportunityId !== opportunityId);
