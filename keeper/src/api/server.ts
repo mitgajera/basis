@@ -66,9 +66,19 @@ export function createApi(
   app.get("/api/trades", (req, res) => {
     const since = parseInt((req.query["since"] as string) ?? "0", 10);
     const limit = Math.min(parseInt((req.query["limit"] as string) ?? "20", 10), 100);
-    // Phase 3: query trades table; for now return empty
-    res.setHeader("Cache-Control", "public, max-age=10");
-    res.json([]);
+    res.setHeader("Cache-Control", "public, max-age=5");
+    res.json(logger.getTrades(limit, since));
+  });
+
+  // On-chain devnet settlement state — backed NAV, last NAV tx, minted yield
+  app.get("/api/settlement", async (_req, res) => {
+    try {
+      const settlement = await vault.getSettlement();
+      res.setHeader("Cache-Control", "public, max-age=10");
+      res.json(settlement);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
   });
 
   app.get("/api/replay", (req, res) => {
@@ -123,33 +133,41 @@ export function createApi(
       const snapshot = await vault.getSnapshot();
       const navHistory = logger.getNavHistory(7 * 24 * 3600_000);
 
-      // Compute APR from NAV history
-      const currentNav = navHistory.at(-1)?.navPerShare ?? 1;
-      const nav24hAgo = navHistory.find((p) => p.timestamp >= Date.now() - 24 * 3600_000)?.navPerShare;
-      const nav7dAgo = navHistory[0]?.navPerShare;
-      const apr24h = nav24hAgo != null && nav24hAgo > 0
-        ? ((currentNav / nav24hAgo - 1) * 365 * 100)
-        : 0;
-      const apr7d = nav7dAgo != null && nav7dAgo > 0 && navHistory.length > 1
-        ? ((currentNav / nav7dAgo - 1) * 52 * 100)
-        : 0;
+      // Annualize by ACTUAL elapsed time between the window's first and last point.
+      // Require a minimum window (≥1h) so tiny samples don't produce absurd APRs,
+      // and cap the result so a transient blip can't display nonsense.
+      const MIN_WINDOW_MS = 15 * 60_000;     // need ≥15m of data
+      const APR_CAP = 100;                    // clamp display to ±100%
+      const computeApr = (windowMs: number): number | null => {
+        const cutoff = Date.now() - windowMs;
+        const pts = navHistory.filter((p) => p.timestamp >= cutoff && p.navPerShare > 0);
+        if (pts.length < 2) return null;
+        const first = pts[0]!, last = pts[pts.length - 1]!;
+        const elapsedMs = last.timestamp - first.timestamp;
+        if (elapsedMs < MIN_WINDOW_MS) return null;
+        const growth = last.navPerShare / first.navPerShare - 1;
+        const apr = (growth / elapsedMs) * (365 * 24 * 3600_000) * 100;
+        return Math.max(-APR_CAP, Math.min(APR_CAP, apr));
+      };
 
-      // Count total spread opportunities logged as proxy for trade activity
+      const apr24h = computeApr(24 * 3600_000);
+      const apr7d = computeApr(7 * 24 * 3600_000);
+
       const spreads = logger.getSpreads(0);
       const totalTrades = getPositions().length;
 
       res.setHeader("Cache-Control", "public, max-age=15");
       res.json({
         tvl: snapshot.tvl,
-        apr24h: parseFloat(apr24h.toFixed(2)),
-        apr7d: parseFloat(apr7d.toFixed(2)),
+        apr24h: apr24h != null ? parseFloat(apr24h.toFixed(2)) : null,
+        apr7d: apr7d != null ? parseFloat(apr7d.toFixed(2)) : null,
         uptimePct: 100,
         totalTrades,
         spreadOpportunities: spreads.length,
         winRate: 0,
       });
     } catch {
-      res.json({ tvl: 0, apr24h: 0, apr7d: 0, uptimePct: 100, totalTrades: 0, winRate: 0 });
+      res.json({ tvl: 0, apr24h: null, apr7d: null, uptimePct: 100, totalTrades: 0, winRate: 0 });
     }
   });
 
