@@ -22,6 +22,7 @@ keeper/data/
 
 # Build artifacts
 *.tsbuildinfo
+web/idl/
 
 # OS
 .DS_Store
