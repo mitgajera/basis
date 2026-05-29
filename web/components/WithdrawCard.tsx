@@ -25,15 +25,17 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
   const [shares, setShares] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Props arrive in raw on-chain units (1e6-scaled); the input field is human bUSD.
+  const userSharesHuman = userShares / 1_000_000;
   const sharesNum = parseFloat(shares) || 0;
   const usdcPreview = totalShares > 0
-    ? (sharesNum * totalAssets) / totalShares
+    ? (sharesNum * totalAssets) / totalShares   // totalAssets/totalShares = $/share
     : 0;
-  const insufficient = sharesNum > userShares;
+  const insufficient = sharesNum > userSharesHuman;
   const canWithdraw = sharesNum > 0 && !insufficient && !!publicKey && !!program;
 
   const setPct = (pct: number) => {
-    setShares(((userShares * pct) / 100).toFixed(4));
+    setShares(((userSharesHuman * pct) / 100).toFixed(4));
   };
 
   const handleWithdraw = async () => {
