@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Header } from "../../components/Header";
 import { DepositCard } from "../../components/DepositCard";
 import { WithdrawCard } from "../../components/WithdrawCard";
+import { SettlementCard } from "../../components/SettlementCard";
 import { useVaultState, useUserPosition, useUsdcBalance } from "../../lib/anchor";
 import { useStats } from "../../lib/api-client";
 import { formatUsd, formatShares } from "../../lib/format";
@@ -84,6 +85,9 @@ export default function VaultPage() {
             )}
           </div>
         </div>
+
+        {/* On-chain settlement */}
+        <SettlementCard />
 
         {/* User position */}
         {publicKey && (

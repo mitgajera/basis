@@ -57,6 +57,13 @@ export function useHealth() {
   });
 }
 
+export function useSettlement() {
+  return useSWR(`${API}/api/settlement`, fetcher, {
+    refreshInterval: 15_000,
+    revalidateOnFocus: false,
+  });
+}
+
 export function useFundingRateHistory(lookbackMs: number) {
   return useSWR(`${API}/api/funding-rate-history?lookback=${lookbackMs}`, fetcher, {
     refreshInterval: 30_000,

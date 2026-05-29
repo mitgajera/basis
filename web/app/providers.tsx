@@ -21,11 +21,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
           {children}
           <Toaster
             theme="dark"
+            position="bottom-right"
+            gap={10}
+            offset={20}
             toastOptions={{
-              style: {
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
+              duration: 5000,
+              classNames: {
+                toast: "basis-toast",
+                title: "basis-toast-title",
+                description: "basis-toast-desc",
+                actionButton: "basis-toast-action",
+                closeButton: "basis-toast-close",
+                icon: "basis-toast-icon",
               },
             }}
           />

@@ -7,7 +7,6 @@ import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@sol
 import { useWallet } from "@solana/wallet-adapter-react";
 import { toast } from "sonner";
 import { useVaultProgram, getVaultPDA, getUserPositionPDA, USDC_MINT, PROGRAM_ID } from "../lib/anchor";
-import { requestFaucet } from "../lib/api-client";
 import { formatUsd, formatShares } from "../lib/format";
 
 const CLUSTER = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
@@ -27,7 +26,6 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [faucetLoading, setFaucetLoading] = useState(false);
   const amountNum = parseFloat(amount) || 0;
   const sharesPreview = totalAssets > 0 && totalShares > 0
     ? (amountNum * totalShares) / totalAssets
@@ -36,25 +34,6 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
   const insufficientBalance = amountNum > userUsdcBalance;
   const canDeposit = amountNum >= MIN_DEPOSIT && !insufficientBalance && !!publicKey && !!program;
 
-  const handleFaucet = async () => {
-    if (!publicKey) return;
-    setFaucetLoading(true);
-    const toastId = toast.loading("Requesting devnet USDC...");
-    try {
-      const result = await requestFaucet(publicKey.toBase58());
-      if (result.ok) {
-        toast.success("50 devnet USDC sent to your wallet!", { id: toastId });
-        onSuccess?.();
-      } else {
-        toast.error(result.error ?? "Faucet failed", { id: toastId });
-      }
-    } catch (e) {
-      toast.error(`Faucet error: ${(e as Error).message}`, { id: toastId });
-    } finally {
-      setFaucetLoading(false);
-    }
-  };
-
   const setPct = (pct: number) => {
     setAmount(((userUsdcBalance * pct) / 100).toFixed(2));
   };
@@ -62,7 +41,11 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
   const handleDeposit = async () => {
     if (!program || !publicKey) return;
     setLoading(true);
-    const toastId = toast.loading("Submitting deposit...");
+    const depositAmt = amountNum;
+    const sharesOut = sharesPreview;
+    const toastId = toast.loading("Confirming deposit…", {
+      description: `Depositing ${formatUsd(depositAmt)} into the vault`,
+    });
     try {
       const [vaultPda] = getVaultPDA();
       const [userPositionPda] = getUserPositionPDA(publicKey);
@@ -91,17 +74,24 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
         })
         .rpc();
 
-      toast.success("Deposit confirmed", {
+      toast.success(`Deposited ${formatUsd(depositAmt)}`, {
         id: toastId,
+        description: `Received ${formatShares(sharesOut)} bUSD shares`,
         action: {
-          label: "Solscan",
+          label: "View ↗",
           onClick: () => window.open(`https://solscan.io/tx/${sig}?cluster=${CLUSTER}`),
         },
       });
       setAmount("");
       onSuccess?.();
     } catch (e: unknown) {
-      toast.error(`Deposit failed: ${(e as Error).message}`, { id: toastId });
+      const msg = (e as Error).message ?? "";
+      const friendly = /user rejected|rejected the request/i.test(msg)
+        ? "You rejected the transaction"
+        : /insufficient|0x1\b/i.test(msg)
+        ? "Insufficient balance for this deposit"
+        : "Transaction failed — please try again";
+      toast.error("Deposit failed", { id: toastId, description: friendly });
     } finally {
       setLoading(false);
     }
@@ -150,20 +140,7 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
         <p className="text-xs text-negative">Minimum deposit is 1 USDC</p>
       )}
       {insufficientBalance && (
-        <div className="space-y-2">
-          <p className="text-xs text-negative">
-            Insufficient USDC balance — you have {userUsdcBalance.toFixed(2)} USDC
-          </p>
-          {publicKey && (
-            <button
-              onClick={handleFaucet}
-              disabled={faucetLoading}
-              className="w-full py-2 rounded-md text-xs font-medium border border-border-default text-text-secondary hover:text-text-primary hover:border-border-default/80 transition-colors duration-150 disabled:opacity-40"
-            >
-              {faucetLoading ? "Requesting..." : "Get 50 devnet USDC →"}
-            </button>
-          )}
-        </div>
+        <p className="text-xs text-negative">Insufficient USDC balance</p>
       )}
 
       <button

@@ -39,7 +39,11 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
   const handleWithdraw = async () => {
     if (!program || !publicKey) return;
     setLoading(true);
-    const toastId = toast.loading("Submitting withdrawal...");
+    const burnShares = sharesNum;
+    const usdcOut = usdcPreview;
+    const toastId = toast.loading("Confirming withdrawal…", {
+      description: `Redeeming ${formatShares(burnShares)} bUSD`,
+    });
     try {
       const [vaultPda] = getVaultPDA();
       const [userPositionPda] = getUserPositionPDA(publicKey);
@@ -67,17 +71,24 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
         })
         .rpc();
 
-      toast.success("Withdrawal confirmed", {
+      toast.success(`Withdrew ${formatUsd(usdcOut)}`, {
         id: toastId,
+        description: `Burned ${formatShares(burnShares)} bUSD shares`,
         action: {
-          label: "Solscan",
+          label: "View ↗",
           onClick: () => window.open(`https://solscan.io/tx/${sig}?cluster=${CLUSTER}`),
         },
       });
       setShares("");
       onSuccess?.();
     } catch (e: unknown) {
-      toast.error(`Withdrawal failed: ${(e as Error).message}`, { id: toastId });
+      const msg = (e as Error).message ?? "";
+      const friendly = /user rejected|rejected the request/i.test(msg)
+        ? "You rejected the transaction"
+        : /insufficient/i.test(msg)
+        ? "Insufficient shares to withdraw"
+        : "Transaction failed — please try again";
+      toast.error("Withdrawal failed", { id: toastId, description: friendly });
     } finally {
       setLoading(false);
     }

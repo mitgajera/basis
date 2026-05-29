@@ -14,7 +14,7 @@ const WalletMultiButton = dynamic(
 const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/vault", label: "Vault" },
-  { href: "/replay", label: "Replay" },
+  // { href: "/replay", label: "Replay" },
 ];
 
 export function Header() {

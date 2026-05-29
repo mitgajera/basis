@@ -65,7 +65,7 @@ export function PositionList() {
               </div>
             ))}
           </div>
-          <div className="divide-y divide-border-subtle/30">
+          <div className="divide-y divide-border-subtle/30 overflow-y-auto max-h-[340px]">
             {positions.map((pos, i) => {
               const color = VENUE_COLOR[pos.venue.toLowerCase()] ?? "#52526A";
               const pnlPct = pos.notionalUsd > 0 ? (pos.unrealizedPnl / pos.notionalUsd) * 100 : 0;

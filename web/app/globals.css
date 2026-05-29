@@ -152,5 +152,51 @@ body {
   filter: drop-shadow(0 0 12px rgba(0, 221, 184, 0.08));
 }
 
+/* ── Toasts (sonner) ───────────────────────────────────────────────────────── */
+.basis-toast {
+  background: rgba(12, 12, 24, 0.78) !important;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 32px rgba(0, 0, 0, 0.5) !important;
+  padding: 14px 16px !important;
+  gap: 12px !important;
+}
+.basis-toast-title {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em;
+  color: var(--text-primary) !important;
+}
+.basis-toast-desc {
+  font-size: 11.5px !important;
+  color: var(--text-tertiary) !important;
+  margin-top: 2px !important;
+  font-variant-numeric: tabular-nums;
+}
+.basis-toast-icon { margin-right: 2px; }
+.basis-toast-action {
+  background: var(--accent) !important;
+  color: #07070E !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 7px !important;
+  padding: 5px 10px !important;
+  transition: filter 0.15s;
+}
+.basis-toast-action:hover { filter: brightness(1.1); }
+.basis-toast-close {
+  background: var(--bg-surface-2) !important;
+  border: 1px solid var(--border-default) !important;
+  color: var(--text-tertiary) !important;
+}
+/* success / error accent dots via sonner data attrs */
+[data-sonner-toast][data-type="success"] .basis-toast-icon { color: var(--positive) !important; }
+[data-sonner-toast][data-type="error"]   .basis-toast-icon { color: var(--negative) !important; }
+[data-sonner-toast][data-type="loading"] .basis-toast-icon { color: var(--accent)   !important; }
+
 /* ── Hide TradingView logo ─────────────────────────────────────────────────── */
 a[href*="tradingview"], .tv-lightweight-charts ~ a { display: none !important; }
