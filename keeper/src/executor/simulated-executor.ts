@@ -84,11 +84,11 @@ export class SimulatedExecutor {
   }
 
   updateUnrealizedPnl(
-    fundingByVenue: Map<Venue, number>,
+    fundingByVenueAsset: Map<string, number>,
     elapsedHours: number,
   ): void {
     for (const pos of this.positions) {
-      const hourlyRate = fundingByVenue.get(pos.venue) ?? 0;
+      const hourlyRate = fundingByVenueAsset.get(`${pos.venue}:${pos.asset}`) ?? 0;
       // Long: pays funding if positive rate; earns if negative
       // Short: earns funding if positive rate; pays if negative
       const sign = pos.side === "short" ? 1 : -1;
