@@ -2,10 +2,155 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --accent: #22d3ee; /* teal-400 */
+/* ── Digit slot animations ─────────────────────────────────────────────────── */
+@keyframes digit-up {
+  from { transform: translateY(60%); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+@keyframes digit-down {
+  from { transform: translateY(-60%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
-* {
-  font-variant-numeric: tabular-nums;
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Blue-tinted darks — what separates premium UIs from pure-black */
+  --bg-base:      #07070E;
+  --bg-surface:   #0C0C16;
+  --bg-surface-2: #12121E;
+  --bg-surface-3: #191928;
+  --bg-overlay:   rgba(4, 4, 10, 0.92);
+
+  /* Borders — barely visible, cool-tinted */
+  --border-subtle:  #1A1A28;
+  --border-default: #222234;
+  --border-strong:  #2E2E48;
+
+  /* Text — slightly blue-tinted whites */
+  --text-primary:   #EEEEF8;
+  --text-secondary: #8484A0;
+  --text-tertiary:  #54546A;
+  --text-disabled:  #34344A;
+
+  /* Brand */
+  --accent:        #00DDB8;
+  --accent-hover:  #00F0C8;
+  --accent-bg:     rgba(0, 221, 184, 0.07);
+  --accent-border: rgba(0, 221, 184, 0.20);
+
+  /* Status — vivid, slightly warmer */
+  --positive:    #1EC996;
+  --positive-bg: rgba(30, 201, 150, 0.08);
+  --negative:    #FF5252;
+  --negative-bg: rgba(255, 82, 82, 0.08);
+  --warning:     #F5A623;
+  --critical:    #FF3333;
+
+  /* Venue colors — harmonious, distinct */
+  --venue-backpack:    #5B9CF6;
+  --venue-pacifica:    #E879A0;
+  --venue-phoenix:     #F97316;
+  --venue-drift:       #EAB308;
+  --venue-jupiter:     #22C98A;
+  --venue-hyperliquid: #84CC16;
 }
+
+/* ── Base reset ────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "tnum", "kern";
+}
+
+/* ── Utility classes ───────────────────────────────────────────────────────── */
+.tabular-mono {
+  font-family: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.live-dot  { animation: live-pulse 2.4s ease-in-out infinite; }
+.fade-in   { animation: fade-in 0.2s ease-out forwards; }
+
+/* ── Skeleton loader ───────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface)   0%,
+    var(--bg-surface-2) 50%,
+    var(--bg-surface)   100%
+  );
+  background-size: 400px 100%;
+  animation: shimmer 2s infinite linear;
+  border-radius: 4px;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ── Selection ─────────────────────────────────────────────────────────────── */
+::selection { background: rgba(0, 221, 184, 0.15); color: var(--text-primary); }
+
+/* ── Glass morphism ────────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(12, 12, 24, 0.55);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.glass-card {
+  background: rgba(12, 12, 24, 0.60);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 2px 16px rgba(0, 0, 0, 0.35);
+}
+
+.glass-header {
+  background: rgba(7, 7, 14, 0.80);
+  backdrop-filter: blur(32px) saturate(1.5);
+  -webkit-backdrop-filter: blur(32px) saturate(1.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 1px 0 rgba(0, 221, 184, 0.03);
+}
+
+/* ── Chart glow ────────────────────────────────────────────────────────────── */
+.chart-glow {
+  filter: drop-shadow(0 0 12px rgba(0, 221, 184, 0.08));
+}
+
+/* ── Hide TradingView logo ─────────────────────────────────────────────────── */
+a[href*="tradingview"], .tv-lightweight-charts ~ a { display: none !important; }
