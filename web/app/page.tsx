@@ -1,8 +1,23 @@
-export default function Home() {
+import { Header } from "../components/Header";
+import { FundingSection } from "../components/FundingSection";
+import { NavChart } from "../components/NavChart";
+import { PositionList } from "../components/PositionList";
+import { TradeHistory } from "../components/TradeHistory";
+import { DashboardStats } from "./dashboard-stats";
+
+export default function DashboardPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-gray-950 text-gray-100">
-      <h1 className="font-mono text-4xl font-bold text-cyan-400">basis.</h1>
-      <p className="mt-2 text-gray-400">Coming soon.</p>
-    </main>
+    <div className="min-h-screen bg-bg-base">
+      <Header />
+      <main className="mx-auto max-w-screen-2xl px-6 pt-5 pb-10 space-y-4">
+        <DashboardStats />
+        <FundingSection />
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <NavChart />
+          <PositionList />
+        </div>
+        <TradeHistory />
+      </main>
+    </div>
   );
 }
