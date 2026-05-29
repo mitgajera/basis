@@ -1,3 +1,13 @@
+export const TRACKED_ASSETS = [
+  "SOL-PERP",
+  "BTC-PERP",
+  "ETH-PERP",
+  "HYPE-PERP",
+  "SUI-PERP",
+  "DOGE-PERP",
+] as const;
+export type TrackedAsset = (typeof TRACKED_ASSETS)[number];
+
 export const RISK = {
   MAX_LEVERAGE: 1.5,
   MARGIN_FLOOR: 0.5,
