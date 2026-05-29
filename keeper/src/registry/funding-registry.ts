@@ -10,6 +10,9 @@ export interface SpreadOpportunity {
   computedAt: number;
 }
 
+// Funding/price data older than this is considered stale — a venue's feed has frozen.
+export const STALE_MS = 60_000;
+
 export class FundingRegistry {
   private state = new Map<string, FundingRateInfo>();
 
@@ -33,7 +36,9 @@ export class FundingRegistry {
   // Short on the venue where longs pay more (higher rate).
   // Long on the venue where longs pay less (lower rate).
   pairwiseSpreads(asset: string): SpreadOpportunity[] {
-    const rates = this.getAllForAsset(asset);
+    // Exclude venues whose feed has frozen — never trade on a stale price.
+    const now = Date.now();
+    const rates = this.getAllForAsset(asset).filter((r) => now - r.lastUpdated <= STALE_MS);
     const opportunities: SpreadOpportunity[] = [];
 
     for (let i = 0; i < rates.length; i++) {
