@@ -46,7 +46,8 @@ export class VaultClient {
       const provider = new AnchorProvider(this.connection, wallet, { commitment: "confirmed" });
       this.program = new Program(idl, provider) as unknown as AnyProgram;
 
-      ;[this.vaultPda] = PublicKey.findProgramAddressSync([VAULT_SEED], this.programId);
+      const usdcMintPk = new PublicKey(this.config.USDC_MINT);
+      ;[this.vaultPda] = PublicKey.findProgramAddressSync([VAULT_SEED, usdcMintPk.toBuffer()], this.programId);
     } catch {
       // IDL may not be generated yet; fall through to stub
     }
