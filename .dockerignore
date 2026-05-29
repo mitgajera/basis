@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+# Heavy Rust build output — the keeper uses the vendored IDL in keeper/idl instead
+anchor/
+# Local runtime data (SQLite lives on the Fly volume, not the image)
+keeper/data/
+data/
+.git/
+*.log
