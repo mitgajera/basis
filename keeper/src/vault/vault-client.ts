@@ -10,7 +10,13 @@ import { VaultSnapshot } from "@basis/shared";
 const log = pino({ transport: { target: "pino-pretty" } });
 
 const VAULT_SEED = Buffer.from("vault");
-const IDL_PATH = path.resolve(__dirname, "../../../anchor/target/idl/basis_vault.json");
+// Prefer the vendored IDL (committed, available in prod/Docker); fall back to the
+// local Anchor build output for development.
+const IDL_CANDIDATES = [
+  path.resolve(__dirname, "../../idl/basis_vault.json"),
+  path.resolve(__dirname, "../../../anchor/target/idl/basis_vault.json"),
+];
+const IDL_PATH = IDL_CANDIDATES.find((p) => fs.existsSync(p)) ?? IDL_CANDIDATES[0]!;
 
 // Loose type to avoid deep generic instantiation before IDL is generated
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
