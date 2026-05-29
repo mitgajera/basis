@@ -3,33 +3,32 @@ import { loadConfig } from "./config";
 import { BackpackAdapter } from "./venues/backpack";
 import { PacificaAdapter } from "./venues/pacifica";
 import { PhoenixAdapter } from "./venues/phoenix";
-import { DriftAdapter } from "./venues/fallback/drift";
-import { JupiterAdapter } from "./venues/fallback/jupiter";
+import { HyperliquidAdapter } from "./venues/hyperliquid";
 import { VenueAdapter, Venue } from "./venues/index";
 import { FundingRegistry } from "./registry/funding-registry";
 import { Logger } from "./logger/sqlite";
 import { RiskEngine } from "./risk/engine";
 import { VaultClient } from "./vault/vault-client";
-import { Reconciler } from "./executor/reconciler";
 import { SimulatedExecutor } from "./executor/simulated-executor";
 import { rankOpportunity, DEFAULT_RANKER_CONFIG } from "./strategy/ranker";
 import { sizePosition, DEFAULT_SIZER_CONFIG } from "./strategy/sizer";
 import { createApi } from "./api/server";
 import { computeNav } from "./vault/compute-nav";
 import { navPerShare } from "@basis/shared";
-import { STRATEGY, VAULT, RISK } from "@basis/shared";
+import { STRATEGY, VAULT, RISK, TRACKED_ASSETS } from "@basis/shared";
 
 const log = pino({ transport: { target: "pino-pretty" } });
 
 async function main() {
   const config = loadConfig();
-  log.info({ LIVE_TRADING: config.LIVE_TRADING, USE_FALLBACK_VENUES: config.USE_FALLBACK_VENUES }, "starting keeper");
+  log.info({ LIVE_TRADING: config.LIVE_TRADING }, "starting keeper");
 
   // Init venue adapters
   const venueList: VenueAdapter[] = [
     new BackpackAdapter(config),
-    config.USE_FALLBACK_VENUES ? new DriftAdapter() : new PacificaAdapter(config),
-    config.USE_FALLBACK_VENUES ? new JupiterAdapter() : new PhoenixAdapter(config),
+    new PacificaAdapter(config),
+    new PhoenixAdapter(config),
+    new HyperliquidAdapter(),
   ];
 
   // Init adapters, skip those that throw (stub adapters)
@@ -48,16 +47,41 @@ async function main() {
   const logger = new Logger(config.LOG_DB_PATH);
   const risk = new RiskEngine();
   const vault = new VaultClient(config);
-  const reconciler = new Reconciler(adapters, logger);
+
   const executor = new SimulatedExecutor(adapters, logger);
 
   // Subscribe live funding data from initialized adapters
   for (const adapter of adapters.values()) {
-    adapter.subscribeFunding("SOL-PERP", (info) => {
-      registry.upsert(info);
-      logger.logFunding(info);
-    });
+    for (const asset of TRACKED_ASSETS) {
+      adapter.subscribeFunding(asset, (info) => {
+        registry.upsert(info);
+        logger.logFunding(info);
+      });
+    }
   }
+
+  // Initial + periodic REST poll so every venue has data immediately (Backpack WS only fires near settlement)
+  const pollFundingRates = async () => {
+    for (const [venue, adapter] of adapters.entries()) {
+      for (const asset of TRACKED_ASSETS) {
+        try {
+          const info = await adapter.getFundingRate(asset);
+          registry.upsert(info);
+          logger.logFunding(info);
+        } catch (e) {
+          const msg = String(e);
+          // Downgrade "unknown asset" errors to debug — expected for single-venue assets
+          if (msg.includes("unknown asset") || msg.includes("no data for") || msg.includes(": 400") || msg.includes(": 404")) {
+            log.debug({ venue, asset }, "asset not listed on venue");
+          } else {
+            log.warn({ venue, asset, err: msg }, "funding rate poll failed");
+          }
+        }
+      }
+    }
+  };
+  await pollFundingRates();
+  setInterval(pollFundingRates, 30_000);
 
   const venueHealthMap: Record<string, { ok: boolean; lastSeen: number }> = {};
   for (const v of adapters.keys()) {
@@ -67,7 +91,7 @@ async function main() {
   // Strategy loop
   setInterval(async () => {
     try {
-      const spreads = registry.pairwiseSpreads("SOL-PERP");
+      const spreads = TRACKED_ASSETS.flatMap((a) => registry.pairwiseSpreads(a));
       const snapshot = await vault.getSnapshot();
       const navHistory = logger.getNavHistory(7 * 24 * 60 * 60 * 1000);
 
@@ -131,12 +155,14 @@ async function main() {
       }
 
       // Update simulated PnL with elapsed funding
-      const fundingByVenue = new Map<Venue, number>();
+      const fundingByVenueAsset = new Map<string, number>();
       for (const [v] of adapters.entries()) {
-        const info = registry.get(v, "SOL-PERP");
-        if (info) fundingByVenue.set(v, info.hourlyRate);
+        for (const asset of TRACKED_ASSETS) {
+          const info = registry.get(v, asset);
+          if (info) fundingByVenueAsset.set(`${v}:${asset}`, info.hourlyRate);
+        }
       }
-      executor.updateUnrealizedPnl(fundingByVenue, STRATEGY.LOOP_INTERVAL_MS / 3_600_000);
+      executor.updateUnrealizedPnl(fundingByVenueAsset, STRATEGY.LOOP_INTERVAL_MS / 3_600_000);
 
     } catch (e) {
       logger.logEvent("error", "strategy_loop_failed", e);
@@ -173,7 +199,11 @@ async function main() {
   }, VAULT.NAV_UPDATE_INTERVAL_MS);
 
   // HTTP API
-  const api = createApi(registry, logger, vault, config.DASHBOARD_ORIGIN);
+  const api = createApi(registry, logger, vault, config.DASHBOARD_ORIGIN, () => executor.openPositions, {
+    rpcUrl: config.HELIUS_RPC_URL,
+    keeperKey: config.KEEPER_PRIVATE_KEY,
+    usdcMint: config.USDC_MINT,
+  });
   api.listen(config.API_PORT, () => {
     log.info({ port: config.API_PORT }, "API server listening");
   });
