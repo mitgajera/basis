@@ -13,8 +13,6 @@ import { SimulatedExecutor } from "./executor/simulated-executor";
 import { rankOpportunity, DEFAULT_RANKER_CONFIG } from "./strategy/ranker";
 import { sizePosition, DEFAULT_SIZER_CONFIG } from "./strategy/sizer";
 import { createApi } from "./api/server";
-import { computeNav } from "./vault/compute-nav";
-import { navPerShare } from "@basis/shared";
 import { STRATEGY, VAULT, RISK, TRACKED_ASSETS } from "@basis/shared";
 
 const log = pino({ transport: { target: "pino-pretty" } });
@@ -49,6 +47,8 @@ async function main() {
   const vault = new VaultClient(config);
 
   const executor = new SimulatedExecutor(adapters, logger);
+  // Restore any positions left open from a previous run (survives keeper restarts)
+  executor.rehydrate(logger.getOpenTrades());
 
   // Subscribe live funding data from initialized adapters
   for (const adapter of adapters.values()) {
@@ -169,32 +169,56 @@ async function main() {
     }
   }, STRATEGY.LOOP_INTERVAL_MS);
 
-  // NAV update loop
+  // Settlement loop — bridges simulated funding yield onto the devnet vault.
+  // Strategy: keeper mints tUSDC profit into the vault account so the NAV rise is
+  // fully backed and withdrawals always succeed, then pushes total_assets on-chain.
+  let mintedYield = 0; // cumulative yield already backed this run
   setInterval(async () => {
     try {
-      const breakdown = await computeNav(vault, adapters, executor.openPositions);
-      const totalAssetsUsd = breakdown.total;
+      // Cumulative simulated PnL across open positions (real funding × notional − fees)
+      const cumulativePnl = executor.openPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
 
-      // Guard: skip update if delta > 4% of last known TVL (likely bad data)
-      const lastSnapshot = await vault.getSnapshot();
-      const lastTvl = lastSnapshot.tvl || totalAssetsUsd;
-      const deltaPct = lastTvl > 0 ? Math.abs(totalAssetsUsd - lastTvl) / lastTvl : 0;
-      if (deltaPct > 0.04 && lastTvl > 0) {
-        log.warn({ deltaPct: (deltaPct * 100).toFixed(2), totalAssetsUsd, lastTvl }, "NAV delta >4% — skipping on-chain update");
-        logger.logEvent("high", "nav_delta_guard_triggered", { deltaPct, totalAssetsUsd, lastTvl });
-        return;
+      const snapshot = await vault.getSnapshot();
+      const totalSharesUnits = snapshot.totalShares / 1_000_000;
+      const hasDepositors = totalSharesUnits > 0;
+
+      // Only settle yield when there are depositors to credit it to.
+      // Physically back new positive yield by minting tUSDC into the vault account.
+      if (vault.isLive && hasDepositors) {
+        const yieldToBack = Math.max(0, cumulativePnl - mintedYield);
+        if (yieldToBack > 0.0001) {
+          const sig = await vault.mintYieldToVault(yieldToBack);
+          if (sig) {
+            mintedYield += yieldToBack;
+            logger.logEvent("info", "yield_settled", { yieldToBack, cumulativePnl, sig });
+          }
+        }
       }
 
-      const totalSharesRaw = lastSnapshot.totalShares;
-      const nav = navPerShare(totalAssetsUsd, totalSharesRaw / 1_000_000);
-      logger.logNav({ totalAssetsUsd, totalShares: totalSharesRaw / 1_000_000, navPerShare: nav });
+      // Set on-chain total_assets to the real vault USDC balance — keeps NAV fully backed.
+      const onChainUsdc = await vault.getIdleBalance();
+      const targetAssets = vault.isLive ? onChainUsdc : (onChainUsdc + cumulativePnl);
 
-      // Push to on-chain vault (no-op if VAULT_PROGRAM_ID not set or IDL not built)
-      await vault.updateNav(totalAssetsUsd);
+      // NAV is $1.00 par when the vault is empty — never log 0/0.
+      const nav = hasDepositors ? targetAssets / totalSharesUnits : 1;
 
-      log.debug({ vaultUsdc: breakdown.vaultUsdc, venueCollateral: breakdown.venueCollateral, unrealizedPnl: breakdown.unrealizedPnl, nav: nav.toFixed(6) }, "NAV updated");
+      // Sanity guard: this vault's NAV starts at 1.0 and only grows (yield-only),
+      // so anything outside [0.5, 100] is a transient bad on-chain read. Skip the
+      // whole cycle so we never log garbage history or push a bad value on-chain.
+      const navSane = nav >= 0.5 && nav <= 100;
+      if (hasDepositors && !navSane) {
+        log.warn({ nav, targetAssets, totalSharesUnits }, "implausible NAV — skipping settlement (bad on-chain read)");
+      } else {
+        if (hasDepositors) {
+          logger.logNav({ totalAssetsUsd: targetAssets, totalShares: totalSharesUnits, navPerShare: nav });
+        }
+        if (vault.isLive && hasDepositors) {
+          const sig = await vault.updateNav(targetAssets);
+          log.debug({ targetAssets: targetAssets.toFixed(6), nav: nav.toFixed(6), cumulativePnl: cumulativePnl.toFixed(6), mintedYield: mintedYield.toFixed(6), sig }, "settlement pushed on-chain");
+        }
+      }
     } catch (e) {
-      logger.logEvent("error", "nav_update_failed", e);
+      logger.logEvent("error", "settlement_failed", e);
     }
   }, VAULT.NAV_UPDATE_INTERVAL_MS);
 
