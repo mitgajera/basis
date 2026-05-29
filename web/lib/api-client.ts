@@ -1,21 +1,89 @@
-import type { FundingRateInfo, SpreadOpportunity, Position, VaultSnapshot, Stats } from "@basis/shared";
+import useSWR from "swr";
 
-const API_BASE = process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_KEEPER_API_URL ?? "http://localhost:8080";
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
-  return res.json() as Promise<T>;
+const fetcher = (url: string) =>
+  fetch(url).then((r) => {
+    if (!r.ok) throw new Error(`API ${r.status}`);
+    return r.json();
+  });
+
+export function useFundingRates() {
+  return useSWR(`${API}/api/funding-rates`, fetcher, {
+    refreshInterval: 5_000,
+    revalidateOnFocus: false,
+  });
 }
 
-export const api = {
-  getFundingRates: () => get<FundingRateInfo[]>("/api/funding-rates"),
-  getSpreads: () => get<SpreadOpportunity[]>("/api/spreads"),
-  getPositions: () => get<Position[]>("/api/positions"),
-  getNav: () => get<{ snapshot: VaultSnapshot; history: { timestamp: number; navPerShare: number }[] }>("/api/nav"),
-  getTrades: (since = 0, limit = 20) => get<unknown[]>(`/api/trades?since=${since}&limit=${limit}`),
-  getReplay: (from: number, to: number) =>
-    get<{ fundingRates: FundingRateInfo[]; spreads: SpreadOpportunity[] }>(`/api/replay?from=${from}&to=${to}`),
-  getHealth: () => get<{ ok: boolean; uptime: number; venues: Record<string, unknown> }>("/api/health"),
-  getStats: () => get<Stats & { tvl: number }>("/api/stats"),
-};
+export function useSpreads(asset = "SOL-PERP") {
+  return useSWR(`${API}/api/spreads?asset=${asset}`, fetcher, {
+    refreshInterval: 5_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useNav() {
+  return useSWR(`${API}/api/nav`, fetcher, {
+    refreshInterval: 60_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useStats() {
+  return useSWR(`${API}/api/stats`, fetcher, {
+    refreshInterval: 10_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function usePositions() {
+  return useSWR(`${API}/api/positions`, fetcher, {
+    refreshInterval: 10_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useTrades(limit = 20) {
+  return useSWR(`${API}/api/trades?limit=${limit}`, fetcher, {
+    refreshInterval: 15_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useHealth() {
+  return useSWR(`${API}/api/health`, fetcher, {
+    refreshInterval: 10_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useFundingRateHistory(lookbackMs: number) {
+  return useSWR(`${API}/api/funding-rate-history?lookback=${lookbackMs}`, fetcher, {
+    refreshInterval: 30_000,
+    revalidateOnFocus: false,
+  });
+}
+
+export function useSpreadHistory(lookbackMs = 24 * 3600_000, asset = "SOL-PERP") {
+  return useSWR(`${API}/api/spread-history?lookback=${lookbackMs}&asset=${asset}`, fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 60_000,
+  });
+}
+
+export async function requestFaucet(address: string): Promise<{ ok: boolean; sig?: string; error?: string }> {
+  const res = await fetch(`${API}/api/faucet`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  return res.json();
+}
+
+export function useReplay(fromTs: number | null, toTs: number | null) {
+  return useSWR(
+    fromTs && toTs ? `${API}/api/replay?from=${fromTs}&to=${toTs}` : null,
+    fetcher,
+    { revalidateOnFocus: false, revalidateIfStale: false }
+  );
+}
