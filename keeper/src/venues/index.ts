@@ -1,6 +1,6 @@
 // Re-export VenueAdapter interface + associated types from shared where available;
 // these local definitions remain the authoritative source for keeper-internal use.
-export type Venue = "pacifica" | "phoenix" | "backpack" | "drift" | "jupiter";
+export type Venue = "pacifica" | "phoenix" | "backpack" | "drift" | "jupiter" | "hyperliquid";
 
 export interface FundingRateInfo {
   venue: Venue;

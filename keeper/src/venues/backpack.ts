@@ -13,8 +13,12 @@ import { normalizeToHourlyDecimal, hourlyToAnnualizedPct } from "../strategy/nor
 
 const BASE_URL = "https://api.backpack.exchange";
 const WS_URL = "wss://ws.backpack.exchange";
-const ASSET_SYMBOL = "SOL_USDC_PERP";
 const WINDOW = 5000;
+
+const PERP_SYMBOLS = [
+  "SOL_USDC_PERP", "BTC_USDC_PERP", "ETH_USDC_PERP",
+  "HYPE_USDC_PERP", "SUI_USDC_PERP", "DOGE_USDC_PERP",
+];
 
 export class BackpackAdapter implements VenueAdapter {
   readonly venue: Venue = "backpack";
@@ -54,7 +58,7 @@ export class BackpackAdapter implements VenueAdapter {
 
   async getFundingRate(asset: string): Promise<FundingRateInfo> {
     const symbol = this._toSymbol(asset);
-    const res = await fetch(`${BASE_URL}/api/v1/markPrices?symbol=${symbol}`);
+    const res = await fetch(`${BASE_URL}/api/v1/markPrices?symbol=${encodeURIComponent(symbol)}`);
     if (!res.ok) throw new Error(`Backpack getFundingRate failed: ${res.status}`);
     const rows = (await res.json()) as Array<{
       fundingRate: string;
@@ -66,8 +70,8 @@ export class BackpackAdapter implements VenueAdapter {
     const data = rows[0];
     if (!data) throw new Error(`Backpack getFundingRate: no data for ${symbol}`);
 
-    // Backpack funding rate is 8h_decimal (three periods per day)
-    const hourlyRate = normalizeToHourlyDecimal(parseFloat(data.fundingRate), "8h_decimal");
+    // Backpack funding rate is 1h_decimal (hourly settlement)
+    const hourlyRate = normalizeToHourlyDecimal(parseFloat(data.fundingRate), "hourly_decimal");
     const info: FundingRateInfo = {
       venue: "backpack",
       asset,
@@ -174,12 +178,13 @@ export class BackpackAdapter implements VenueAdapter {
   // ── private helpers ──────────────────────────────────────────────────────
 
   private _toSymbol(asset: string): string {
-    if (asset === "SOL-PERP") return ASSET_SYMBOL;
-    return asset.replace("-", "_");
+    // "SOL-PERP" → "SOL_USDC_PERP"
+    return asset.replace("-PERP", "_USDC_PERP");
   }
 
   private _fromSymbol(symbol: string): string {
-    return symbol.replace("_USDC_PERP", "-PERP").replace(/_USDC/, "-").replace(/_PERP$/, "-PERP");
+    // "SOL_USDC_PERP" → "SOL-PERP"
+    return symbol.replace("_USDC_PERP", "-PERP");
   }
 
   /** Sign with ED25519. Message = "instruction=<name>&<sorted_params>&timestamp=<ts>&window=<window>" */
@@ -241,10 +246,8 @@ export class BackpackAdapter implements VenueAdapter {
     this.ws = ws;
 
     ws.on("open", () => {
-      ws.send(JSON.stringify({
-        method: "SUBSCRIBE",
-        params: [`markPrice.${ASSET_SYMBOL}`, `fundingRate.${ASSET_SYMBOL}`],
-      }));
+      const params = PERP_SYMBOLS.flatMap((s) => [`markPrice.${s}`, `fundingRate.${s}`]);
+      ws.send(JSON.stringify({ method: "SUBSCRIBE", params }));
     });
 
     ws.on("message", (raw) => {
@@ -272,15 +275,15 @@ export class BackpackAdapter implements VenueAdapter {
 
     if (stream.startsWith("markPrice.")) {
       const price = parseFloat(data["markPrice"] as string);
-      const asset = "SOL-PERP";
+      const asset = this._fromSymbol(stream.replace("markPrice.", ""));
       for (const cb of this.markPriceCallbacks.get(asset) ?? []) cb(price);
     }
 
     if (stream.startsWith("fundingRate.")) {
-      const asset = "SOL-PERP";
+      const asset = this._fromSymbol(stream.replace("fundingRate.", ""));
       const hourlyRate = normalizeToHourlyDecimal(
         parseFloat(data["fundingRate"] as string),
-        "8h_decimal",
+        "hourly_decimal",
       );
       const info: FundingRateInfo = {
         venue: "backpack",

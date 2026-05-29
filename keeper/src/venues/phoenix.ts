@@ -11,8 +11,12 @@ import {
 import { hourlyToAnnualizedPct } from "../strategy/normalize";
 
 const PHOENIX_API_URL = "https://perp-api.phoenix.trade";
-// Phoenix perpetuals use "SOL" as the market symbol (not "SOL-PERP")
-const ASSET_MAP: Record<string, string> = { "SOL-PERP": "SOL" };
+// Phoenix perpetuals use bare ticker symbols
+const ASSET_MAP: Record<string, string> = {
+  "SOL-PERP": "SOL",
+  "BTC-PERP": "BTC",
+  "ETH-PERP": "ETH",
+};
 
 export class PhoenixAdapter implements VenueAdapter {
   readonly venue: Venue = "phoenix";
@@ -70,8 +74,8 @@ export class PhoenixAdapter implements VenueAdapter {
     const markPrice = parseFloat(latest.markPrice);
     const fundingAmountPerUnit = parseFloat(latest.fundingAmountPerUnit);
 
-    // hourly rate = funding paid per SOL per hour / mark price per SOL
-    // fundingAmountPerUnit is USDC per base lot per interval (1h); divide by markPrice for dimensionless rate
+    // fundingAmountPerUnit = USDC paid per 1 base unit per 1h interval
+    // divide by markPrice to get dimensionless hourly rate
     const hourlyRate = markPrice > 0 ? fundingAmountPerUnit / markPrice : 0;
 
     const info: FundingRateInfo = {
