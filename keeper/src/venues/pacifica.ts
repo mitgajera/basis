@@ -246,9 +246,11 @@ export class PacificaAdapter implements VenueAdapter {
   }
 
   private _handleWsMessage(msg: Record<string, unknown>): void {
-    // Pacifica WS format: {"channel": "prices", "data": [{symbol, funding, mark, oracle, timestamp}, ...]}
-    // funding: hourly decimal rate (can be negative)
-    // mark: mark price, oracle: index/oracle price, timestamp: ms
+    // Pacifica WS "prices": {symbol, funding, next_funding, mark, oracle, timestamp}
+    //   funding      = current/last-applied hourly rate
+    //   next_funding = predicted next-hour rate (what the exchange UI shows as
+    //                  "Next Funding" and what the arb actually pays/receives)
+    // Use next_funding so our rate matches the venue and is forward-looking.
     const channel = msg["channel"] as string | undefined;
 
     const processTicker = (data: Record<string, unknown>) => {
@@ -258,7 +260,9 @@ export class PacificaAdapter implements VenueAdapter {
 
       const markPrice = parseFloat((data["mark"] as string) ?? "0");
       const indexPrice = parseFloat((data["oracle"] as string) ?? String(markPrice));
-      const hourlyRate = parseFloat((data["funding"] as string) ?? "0");
+      const hourlyRate = parseFloat(
+        (data["next_funding"] as string) ?? (data["funding"] as string) ?? "0",
+      );
       const timestampMs = parseFloat(String(data["timestamp"] ?? Date.now()));
       const tsSec = Math.floor(timestampMs / 1000);
       const nextFundingTimestamp = (Math.floor(tsSec / 3600) + 1) * 3600;
