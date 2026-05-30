@@ -43,11 +43,53 @@ export function usePositions() {
   });
 }
 
-export function useTrades(limit = 20) {
-  return useSWR(`${API}/api/trades?limit=${limit}`, fetcher, {
-    refreshInterval: 15_000,
-    revalidateOnFocus: false,
-  });
+export const TRADES_LOOKBACK_MS = 24 * 3600_000;
+
+export type TradeRecord = {
+  opportunityId: string;
+  venue: string;
+  asset: string;
+  side: string;
+  sizeUsd: number;
+  fillPrice: number | null;
+  exitPrice: number | null;
+  feeUsd: number;
+  pnlUsd: number | null;
+  status: string;
+  openedAt: number;
+  closedAt: number | null;
+};
+
+export interface TradesPageResponse {
+  trades: TradeRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  lookback: number;
+}
+
+export function useTradesPage(page: number, pageSize = 25) {
+  const offset = (page - 1) * pageSize;
+  return useSWR<TradesPageResponse>(
+    `${API}/api/trades?lookback=${TRADES_LOOKBACK_MS}&limit=${pageSize}&offset=${offset}`,
+    fetcher,
+    { refreshInterval: 10_000, revalidateOnFocus: false }
+  );
+}
+
+export interface PnlHistoryResponse {
+  points: Array<{ timestamp: number; value: number }>;
+  realized: number;
+  unrealized: number;
+  total: number;
+}
+
+export function usePnlHistory(lookbackMs: number, enabled = true) {
+  return useSWR<PnlHistoryResponse>(
+    enabled ? `${API}/api/pnl-history?lookback=${lookbackMs}` : null,
+    fetcher,
+    { refreshInterval: 10_000, revalidateOnFocus: false }
+  );
 }
 
 export function useHealth() {
@@ -78,19 +120,39 @@ export function useSpreadHistory(lookbackMs = 24 * 3600_000, asset = "SOL-PERP")
   });
 }
 
-export async function requestFaucet(address: string): Promise<{ ok: boolean; sig?: string; error?: string }> {
+export interface FaucetResult {
+  ok?: boolean;
+  sig?: string;
+  amount?: number;
+  error?: string;
+  remainingMs?: number;
+  cooldownMs?: number;
+  message?: string;
+}
+
+export async function requestFaucet(address: string): Promise<FaucetResult> {
   const res = await fetch(`${API}/api/faucet`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ address }),
   });
-  return res.json();
+  const body = (await res.json()) as FaucetResult;
+  return { ...body, ok: res.ok };
 }
 
-export function useReplay(fromTs: number | null, toTs: number | null) {
-  return useSWR(
-    fromTs && toTs ? `${API}/api/replay?from=${fromTs}&to=${toTs}` : null,
+export interface FaucetStatus {
+  address: string;
+  cooldownMs: number;
+  lastMintMs: number | null;
+  remainingMs: number;
+  ready: boolean;
+}
+
+export function useFaucetStatus(address: string | null) {
+  return useSWR<FaucetStatus>(
+    address ? `${API}/api/faucet/status?address=${address}` : null,
     fetcher,
-    { revalidateOnFocus: false, revalidateIfStale: false }
+    { refreshInterval: 30_000, revalidateOnFocus: true }
   );
 }
+
