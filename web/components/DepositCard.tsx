@@ -5,11 +5,11 @@ import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { toast } from "sonner";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { toast, toastTx } from "../lib/toast";
 import { useVaultProgram, getVaultPDA, getUserPositionPDA, USDC_MINT, PROGRAM_ID } from "../lib/anchor";
 import { formatUsd, formatShares } from "../lib/format";
 
-const CLUSTER = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
 const MIN_DEPOSIT = 1;
 
 interface DepositCardProps {
@@ -22,6 +22,7 @@ interface DepositCardProps {
 
 export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBalance, onSuccess }: DepositCardProps) {
   const { publicKey } = useWallet();
+  const { setVisible } = useWalletModal();
   const program = useVaultProgram();
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,6 +37,14 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
 
   const setPct = (pct: number) => {
     setAmount(((userUsdcBalance * pct) / 100).toFixed(2));
+  };
+
+  const handleAction = () => {
+    if (!publicKey) {
+      setVisible(true);
+      return;
+    }
+    void handleDeposit();
   };
 
   const handleDeposit = async () => {
@@ -74,13 +83,9 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
         })
         .rpc();
 
-      toast.success(`Deposited ${formatUsd(depositAmt)}`, {
+      toastTx(sig, `Deposited ${formatUsd(depositAmt)}`, {
         id: toastId,
-        description: `Received ${formatShares(sharesOut)} bUSD shares`,
-        action: {
-          label: "View ↗",
-          onClick: () => window.open(`https://solscan.io/tx/${sig}?cluster=${CLUSTER}`),
-        },
+        extra: <span>Received {formatShares(sharesOut)} bUSD shares</span>,
       });
       setAmount("");
       onSuccess?.();
@@ -100,8 +105,8 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-xs text-text-tertiary mb-1.5">You deposit</label>
-        <div className="flex items-center gap-2 border border-border-default rounded-md bg-bg-surface-2 px-3 py-2">
+        <label className="block text-[13px] text-text-secondary mb-2">You deposit</label>
+        <div className="field flex items-center gap-2 px-3 py-3">
           <input
             type="number"
             min="0"
@@ -109,16 +114,21 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
-            className="flex-1 bg-transparent tabular-mono text-text-primary outline-none text-sm"
+            className="flex-1 bg-transparent tabular-mono text-text-primary outline-none text-[18px] font-medium"
           />
-          <span className="text-text-tertiary text-xs">USDC</span>
+          <span className="flex items-center gap-1.5 text-text-tertiary text-[12px] font-medium">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="https://assets.coingecko.com/coins/images/6319/small/usdc.png" alt="" width={16} height={16} className="token-ring" style={{ width: 16, height: 16, padding: 1 }} />
+            USDC
+          </span>
         </div>
-        <div className="flex gap-1 mt-1.5">
+        <div className="flex gap-1.5 mt-2">
           {[25, 50, 75, 100].map((p) => (
             <button
               key={p}
+              type="button"
               onClick={() => setPct(p)}
-              className="text-[11px] px-2 py-0.5 rounded border border-border-subtle text-text-tertiary hover:border-border-default hover:text-text-secondary transition-colors duration-150"
+              className="pct-chip"
             >
               {p === 100 ? "Max" : `${p}%`}
             </button>
@@ -127,12 +137,12 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
       </div>
 
       <div>
-        <label className="block text-xs text-text-tertiary mb-1.5">You receive</label>
-        <div className="flex items-center gap-2 border border-border-subtle rounded-md bg-bg-surface-2 px-3 py-2 opacity-60">
-          <span className="flex-1 tabular-mono text-text-primary text-sm">
+        <label className="block text-[13px] text-text-secondary mb-2">You receive</label>
+        <div className="field flex items-center gap-2 px-3 py-3 opacity-90">
+          <span className="flex-1 tabular-mono text-text-primary text-[18px] font-medium">
             {amountNum > 0 ? formatShares(sharesPreview) : "0.0000"}
           </span>
-          <span className="text-text-tertiary text-xs">bUSD</span>
+          <span className="text-text-tertiary text-[12px] font-medium">bUSD</span>
         </div>
       </div>
 
@@ -144,9 +154,10 @@ export function DepositCard({ navPerShare, totalShares, totalAssets, userUsdcBal
       )}
 
       <button
-        onClick={handleDeposit}
-        disabled={!canDeposit || loading}
-        className="w-full py-2.5 rounded-md text-sm font-medium transition-colors duration-150 bg-accent text-bg-base hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed"
+        type="button"
+        onClick={handleAction}
+        disabled={publicKey ? (!canDeposit || loading) : loading}
+        className="btn-primary w-full py-3.5 text-[14px] mt-2"
       >
         {loading ? "Depositing..." : !publicKey ? "Connect Wallet" : "Deposit USDC"}
       </button>

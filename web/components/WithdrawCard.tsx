@@ -5,11 +5,10 @@ import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { toast } from "sonner";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { toast, toastTx } from "../lib/toast";
 import { useVaultProgram, getVaultPDA, getUserPositionPDA, USDC_MINT, PROGRAM_ID } from "../lib/anchor";
 import { formatUsd, formatShares } from "../lib/format";
-
-const CLUSTER = process.env.NEXT_PUBLIC_CLUSTER ?? "devnet";
 
 interface WithdrawCardProps {
   navPerShare: number;
@@ -21,6 +20,7 @@ interface WithdrawCardProps {
 
 export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares, onSuccess }: WithdrawCardProps) {
   const { publicKey } = useWallet();
+  const { setVisible } = useWalletModal();
   const program = useVaultProgram();
   const [shares, setShares] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,6 +36,14 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
 
   const setPct = (pct: number) => {
     setShares(((userSharesHuman * pct) / 100).toFixed(4));
+  };
+
+  const handleAction = () => {
+    if (!publicKey) {
+      setVisible(true);
+      return;
+    }
+    void handleWithdraw();
   };
 
   const handleWithdraw = async () => {
@@ -73,13 +81,9 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
         })
         .rpc();
 
-      toast.success(`Withdrew ${formatUsd(usdcOut)}`, {
+      toastTx(sig, `Withdrew ${formatUsd(usdcOut)}`, {
         id: toastId,
-        description: `Burned ${formatShares(burnShares)} bUSD shares`,
-        action: {
-          label: "View ↗",
-          onClick: () => window.open(`https://solscan.io/tx/${sig}?cluster=${CLUSTER}`),
-        },
+        extra: <span>Burned {formatShares(burnShares)} bUSD shares</span>,
       });
       setShares("");
       onSuccess?.();
@@ -99,8 +103,8 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
   return (
     <div className="space-y-4">
       <div>
-        <label className="block text-xs text-text-tertiary mb-1.5">You burn</label>
-        <div className="flex items-center gap-2 border border-border-default rounded-md bg-bg-surface-2 px-3 py-2">
+        <label className="block text-[13px] text-text-secondary mb-2">You burn</label>
+        <div className="field flex items-center gap-2 px-3 py-3">
           <input
             type="number"
             min="0"
@@ -108,16 +112,17 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
             value={shares}
             onChange={(e) => setShares(e.target.value)}
             placeholder="0.0000"
-            className="flex-1 bg-transparent tabular-mono text-text-primary outline-none text-sm"
+            className="flex-1 bg-transparent tabular-mono text-text-primary outline-none text-[18px] font-medium"
           />
-          <span className="text-text-tertiary text-xs">bUSD</span>
+          <span className="text-text-tertiary text-[12px] font-medium">bUSD</span>
         </div>
-        <div className="flex gap-1 mt-1.5">
+        <div className="flex gap-1.5 mt-2">
           {[25, 50, 75, 100].map((p) => (
             <button
               key={p}
+              type="button"
               onClick={() => setPct(p)}
-              className="text-[11px] px-2 py-0.5 rounded border border-border-subtle text-text-tertiary hover:border-border-default hover:text-text-secondary transition-colors duration-150"
+              className="pct-chip"
             >
               {p === 100 ? "Max" : `${p}%`}
             </button>
@@ -126,12 +131,12 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
       </div>
 
       <div>
-        <label className="block text-xs text-text-tertiary mb-1.5">You receive</label>
-        <div className="flex items-center gap-2 border border-border-subtle rounded-md bg-bg-surface-2 px-3 py-2 opacity-60">
-          <span className="flex-1 tabular-mono text-text-primary text-sm">
+        <label className="block text-[13px] text-text-secondary mb-2">You receive</label>
+        <div className="field flex items-center gap-2 px-3 py-3 opacity-90">
+          <span className="flex-1 tabular-mono text-text-primary text-[18px] font-medium">
             {sharesNum > 0 ? formatUsd(usdcPreview) : "$0.00"}
           </span>
-          <span className="text-text-tertiary text-xs">USDC</span>
+          <span className="text-text-tertiary text-[12px] font-medium">USDC</span>
         </div>
       </div>
 
@@ -140,9 +145,10 @@ export function WithdrawCard({ navPerShare, totalShares, totalAssets, userShares
       )}
 
       <button
-        onClick={handleWithdraw}
-        disabled={!canWithdraw || loading}
-        className="w-full py-2.5 rounded-md text-sm font-medium transition-colors duration-150 border border-border-default text-text-primary hover:border-accent-border hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed"
+        type="button"
+        onClick={handleAction}
+        disabled={publicKey ? (!canWithdraw || loading) : loading}
+        className="btn-ghost w-full py-3.5 text-[14px] mt-2 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {loading ? "Withdrawing..." : !publicKey ? "Connect Wallet" : "Withdraw USDC"}
       </button>
