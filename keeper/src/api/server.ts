@@ -64,10 +64,34 @@ export function createApi(
   });
 
   app.get("/api/trades", (req, res) => {
-    const since = parseInt((req.query["since"] as string) ?? "0", 10);
-    const limit = Math.min(parseInt((req.query["limit"] as string) ?? "20", 10), 100);
+    const lookback = parseInt(
+      (req.query["lookback"] as string) ?? String(24 * 3600_000),
+      10,
+    );
+    const since = Date.now() - lookback;
+    const limit = Math.min(Math.max(parseInt((req.query["limit"] as string) ?? "25", 10), 1), 100);
+    const offset = Math.max(parseInt((req.query["offset"] as string) ?? "0", 10), 0);
+    const { trades, total } = logger.getTradesPage(since, limit, offset);
     res.setHeader("Cache-Control", "public, max-age=5");
-    res.json(logger.getTrades(limit, since));
+    res.json({ trades, total, limit, offset, lookback });
+  });
+
+  app.get("/api/pnl-history", (req, res) => {
+    const lookback = parseInt((req.query["lookback"] as string) ?? String(24 * 3600_000), 10);
+    const points = logger.getPnlHistory(lookback);
+    const unrealized = getPositions().reduce((s, p) => s + p.unrealizedPnl, 0);
+    const now = Date.now();
+    const realized = points.length > 0 ? points[points.length - 1]!.value : 0;
+    const lastTs = points.length > 0 ? points[points.length - 1]!.timestamp : now - lookback;
+
+    if (now - lastTs > 5_000 || points.length === 0) {
+      points.push({ timestamp: now, value: realized + unrealized });
+    } else {
+      points[points.length - 1] = { timestamp: now, value: realized + unrealized };
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ points, realized, unrealized, total: realized + unrealized });
   });
 
   // On-chain devnet settlement state — backed NAV, last NAV tx, minted yield
@@ -81,20 +105,27 @@ export function createApi(
     }
   });
 
-  app.get("/api/replay", (req, res) => {
-    const from = parseInt((req.query["from"] as string) ?? "0", 10);
-    const to = parseInt((req.query["to"] as string) ?? String(Date.now()), 10);
-    const fundingRates = logger.getFundingRates(from);
-    const spreads = logger.getSpreads(from);
-    res.setHeader("Cache-Control", "public, max-age=30");
+  // Devnet faucet — mints 50 test USDC, rate-limited to one mint per 2 hours per wallet
+  const FAUCET_COOLDOWN_MS = 2 * 60 * 60_000;
+
+  // GET — returns cooldown state for a wallet (used by the UI to render the button)
+  app.get("/api/faucet/status", (req, res) => {
+    const address = (req.query["address"] as string | undefined)?.trim();
+    if (!address) { res.status(400).json({ error: "address required" }); return; }
+    const last = logger.getFaucetLastMint(address);
+    const now = Date.now();
+    const elapsed = last == null ? Infinity : now - last;
+    const remainingMs = Math.max(0, FAUCET_COOLDOWN_MS - elapsed);
+    res.setHeader("Cache-Control", "no-store");
     res.json({
-      fundingRates: fundingRates.filter((r) => r.lastUpdated <= to),
-      spreads: spreads.filter((s) => s.computedAt <= to),
-      trades: [],
+      address,
+      cooldownMs: FAUCET_COOLDOWN_MS,
+      lastMintMs: last,
+      remainingMs,
+      ready: remainingMs === 0,
     });
   });
 
-  // Devnet faucet — mints test USDC to the requesting wallet (50 USDC per call)
   app.post("/api/faucet", async (req, res) => {
     if (!keeperConfig?.keeperKey || !keeperConfig.usdcMint || !keeperConfig.rpcUrl) {
       res.status(503).json({ error: "Faucet not configured" });
@@ -103,6 +134,22 @@ export function createApi(
     const { address } = req.body as { address?: string };
     if (!address) { res.status(400).json({ error: "address required" }); return; }
 
+    // Cooldown check (2h per wallet)
+    const last = logger.getFaucetLastMint(address);
+    if (last != null) {
+      const elapsed = Date.now() - last;
+      if (elapsed < FAUCET_COOLDOWN_MS) {
+        const remainingMs = FAUCET_COOLDOWN_MS - elapsed;
+        res.status(429).json({
+          error: "cooldown",
+          remainingMs,
+          cooldownMs: FAUCET_COOLDOWN_MS,
+          message: `Faucet on cooldown. Try again in ${Math.ceil(remainingMs / 60_000)} min.`,
+        });
+        return;
+      }
+    }
+
     try {
       const connection = new Connection(keeperConfig.rpcUrl, "confirmed");
       const kp = Keypair.fromSeed(Buffer.from(keeperConfig.keeperKey, "base64").slice(0, 32));
@@ -110,15 +157,12 @@ export function createApi(
       const recipient = new PublicKey(address);
 
       const ata = await getOrCreateAssociatedTokenAccount(connection, kp, mint, recipient);
-      const sig = await mintTo(
-        connection,
-        kp,
-        mint,
-        ata.address,
-        kp,
-        50 * 1_000_000, // 50 USDC
-      );
-      res.json({ ok: true, sig, amount: 50 });
+      const sig = await mintTo(connection, kp, mint, ata.address, kp, 50 * 1_000_000);
+
+      // Record the mint AFTER it succeeds, so failed mints don't burn the cooldown
+      logger.recordFaucetMint(address);
+
+      res.json({ ok: true, sig, amount: 50, cooldownMs: FAUCET_COOLDOWN_MS });
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }

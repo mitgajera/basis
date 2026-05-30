@@ -59,4 +59,9 @@ CREATE TABLE IF NOT EXISTS events (
   data        TEXT,
   occurred_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS faucet_log (
+  address      TEXT    PRIMARY KEY,
+  last_mint_ms INTEGER NOT NULL
+);
 `;
