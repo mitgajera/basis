@@ -11,12 +11,25 @@ import {
 import { hourlyToAnnualizedPct } from "../strategy/normalize";
 
 const PHOENIX_API_URL = "https://perp-api.phoenix.trade";
-// Phoenix perpetuals use bare ticker symbols
+// Phoenix perpetuals use bare ticker symbols. Unlisted symbols throw "no data for"
+// which the index.ts poller downgrades to debug, so it's safe to include hopefuls.
 const ASSET_MAP: Record<string, string> = {
   "SOL-PERP": "SOL",
   "BTC-PERP": "BTC",
   "ETH-PERP": "ETH",
+  "HYPE-PERP": "HYPE",
+  "SUI-PERP": "SUI",
+  "DOGE-PERP": "DOGE",
 };
+
+// Cache the funding overview — Phoenix's /getFundingOverview returns *all* symbols
+// in one shot, so we'd otherwise refetch the same payload 6x per cycle.
+const OVERVIEW_TTL_MS = 10_000;
+
+type PhoenixSeries = Array<{
+  symbol: string;
+  points: Array<{ timestamp: number; fundingAmountPerUnit: string; markPrice: string; fundingRate: string }>;
+}>;
 
 export class PhoenixAdapter implements VenueAdapter {
   readonly venue: Venue = "phoenix";
@@ -25,28 +38,17 @@ export class PhoenixAdapter implements VenueAdapter {
   private fundingCallbacks = new Map<string, Set<(info: FundingRateInfo) => void>>();
   private markPriceCallbacks = new Map<string, Set<(price: number) => void>>();
   private latestFunding = new Map<string, FundingRateInfo>();
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private overviewCache: { ts: number; series: PhoenixSeries } | null = null;
+  private overviewInFlight: Promise<{ ts: number; series: PhoenixSeries }> | null = null;
 
   constructor(private _config: Config) {}
 
   async init(): Promise<void> {
-    // Prime the cache with an initial fetch for SOL-PERP
-    try {
-      await this.getFundingRate("SOL-PERP");
-    } catch {
-      // non-fatal; will retry on first poll
-    }
-    // Poll every 30s to keep latestFunding fresh for subscribers
-    this.pollTimer = setInterval(() => {
-      this.getFundingRate("SOL-PERP").catch(() => {});
-    }, 30_000);
+    // Cache is filled lazily on first getFundingRate() call from the index.ts poller,
+    // which already covers every asset on its 30s tick. No per-venue polling needed.
   }
 
   async shutdown(): Promise<void> {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
     this.client.dispose?.();
   }
 
@@ -60,11 +62,29 @@ export class PhoenixAdapter implements VenueAdapter {
     }
   }
 
+  private async _getOverviewSeries(): Promise<PhoenixSeries> {
+    if (this.overviewCache && Date.now() - this.overviewCache.ts < OVERVIEW_TTL_MS) {
+      return this.overviewCache.series;
+    }
+    if (this.overviewInFlight) return (await this.overviewInFlight).series;
+    const p = (async () => {
+      const overview = await this.client.api.funding().getFundingOverview();
+      const series = (overview as { series?: PhoenixSeries }).series ?? [];
+      const cache = { ts: Date.now(), series };
+      this.overviewCache = cache;
+      return cache;
+    })();
+    this.overviewInFlight = p;
+    try {
+      return (await p).series;
+    } finally {
+      this.overviewInFlight = null;
+    }
+  }
+
   async getFundingRate(asset: string): Promise<FundingRateInfo> {
     const symbol = this._toSymbol(asset);
-    // getFundingOverview() returns all markets with mark price + funding per unit
-    const overview = await this.client.api.funding().getFundingOverview();
-    const series = (overview as { series?: Array<{ symbol: string; points: Array<{ timestamp: number; fundingAmountPerUnit: string; markPrice: string; fundingRate: string }> }> }).series ?? [];
+    const series = await this._getOverviewSeries();
     const entry = series.find((s) => s.symbol === symbol);
     if (!entry || entry.points.length === 0) {
       throw new Error(`Phoenix getFundingRate: no data for ${symbol}`);
