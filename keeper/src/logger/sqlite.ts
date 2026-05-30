@@ -42,8 +42,10 @@ export class Logger {
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    const syncUrl = process.env["TURSO_URL"];
-    const authToken = process.env["TURSO_TOKEN"];
+    // Turso sync temporarily disabled — set BASIS_USE_TURSO=1 to re-enable.
+    const tursoEnabled = process.env["BASIS_USE_TURSO"] === "1";
+    const syncUrl = tursoEnabled ? process.env["TURSO_URL"] : undefined;
+    const authToken = tursoEnabled ? process.env["TURSO_TOKEN"] : undefined;
 
     if (syncUrl && authToken) {
       // Embedded replica — local file kept in sync with hosted Turso DB.
