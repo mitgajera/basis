@@ -80,7 +80,11 @@ async function main() {
       }
     }
   };
-  await pollFundingRates();
+  // Fire the initial poll in the background — DON'T await. If a venue's HTTP
+  // is slow (Phoenix is currently flaky, Backpack can fail under cold-start),
+  // awaiting here would block the API server from binding and Render's port
+  // scan would time out, leaving the dashboard "offline" for 10+ minutes.
+  void pollFundingRates();
   setInterval(pollFundingRates, 30_000);
 
   const venueHealthMap: Record<string, { ok: boolean; lastSeen: number }> = {};
