@@ -232,10 +232,12 @@ async function main() {
     keeperKey: config.KEEPER_PRIVATE_KEY,
     usdcMint: config.USDC_MINT,
   });
-  // Bind to 0.0.0.0 explicitly. Newer Node defaults can bind only to ::1/127.0.0.1
-  // which Render's port scanner (which checks 0.0.0.0) can't see → deploy hangs.
-  api.listen(config.API_PORT, "0.0.0.0", () => {
-    log.info({ port: config.API_PORT, host: "0.0.0.0" }, "API server listening");
+  // Render (and most PaaS) inject the port to listen on via $PORT. Prefer that
+  // over our own API_PORT env var so Render's port scanner finds the open socket.
+  // Bind to 0.0.0.0 explicitly — newer Node can default to ::1/127.0.0.1 only.
+  const listenPort = parseInt(process.env["PORT"] ?? String(config.API_PORT), 10);
+  api.listen(listenPort, "0.0.0.0", () => {
+    log.info({ port: listenPort, host: "0.0.0.0" }, "API server listening");
   });
 
   const shutdown = async (signal: string) => {
