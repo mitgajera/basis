@@ -1,5 +1,7 @@
-// Uses Node.js built-in node:sqlite (Node 22.5+) — no native addon compilation required.
-import { DatabaseSync } from "node:sqlite";
+// Uses Turso's `libsql` package — sync API (better-sqlite3 style), with optional
+// embedded-replica mode that auto-syncs the local SQLite file to a hosted Turso
+// database. With TURSO_URL + TURSO_TOKEN set, data survives container restarts.
+import Database from "libsql";
 import fs from "fs";
 import path from "path";
 import pino from "pino";
@@ -9,6 +11,8 @@ import { SpreadOpportunity } from "../registry/funding-registry";
 import { RankedOpportunity } from "../strategy/ranker";
 
 const log = pino({ transport: { target: "pino-pretty" } });
+
+const SYNC_INTERVAL_MS = 30_000;
 
 export interface NavPoint {
   totalAssetsUsd: number;
@@ -31,16 +35,40 @@ export interface TradeLog {
 }
 
 export class Logger {
-  private db: DatabaseSync;
+  private db: Database;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(dbPath: string) {
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+
+    const syncUrl = process.env["TURSO_URL"];
+    const authToken = process.env["TURSO_TOKEN"];
+
+    if (syncUrl && authToken) {
+      // Embedded replica — local file kept in sync with hosted Turso DB.
+      // First sync pulls remote state; subsequent syncs push local writes back.
+      this.db = new Database(dbPath, { syncUrl, authToken });
+      try {
+        this.db.sync();
+        log.info({ dbPath, mode: "turso-replica" }, "SQLite logger initialized (synced from Turso)");
+      } catch (e) {
+        log.warn({ err: String(e) }, "initial Turso sync failed; continuing with local state");
+      }
+      this.syncTimer = setInterval(() => {
+        try { this.db.sync(); } catch (e) {
+          log.warn({ err: String(e) }, "periodic Turso sync failed");
+        }
+      }, SYNC_INTERVAL_MS);
+    } else {
+      // Local-only mode (no Turso configured)
+      this.db = new Database(dbPath);
+      log.info({ dbPath, mode: "local" }, "SQLite logger initialized (no Turso sync)");
+    }
+
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(SCHEMA_SQL);
     this._migrate();
-    log.info({ dbPath }, "SQLite logger initialized");
   }
 
   // ── schema migration — adds columns that may not exist in older DBs ────────
@@ -114,19 +142,45 @@ export class Logger {
     this.db.exec("DELETE FROM trades WHERE status='closed'");
   }
 
-  getTrades(limit = 50, since = 0): Array<{
+  /** Cumulative realized PnL stepped at each close, with baseline before the lookback window. */
+  getPnlHistory(lookbackMs: number): Array<{ timestamp: number; value: number }> {
+    const since = Date.now() - lookbackMs;
+    const baseline = this.db.prepare(
+      `SELECT COALESCE(SUM(pnl_usd), 0) AS total FROM trades
+       WHERE status='closed' AND closed_at IS NOT NULL AND pnl_usd IS NOT NULL AND closed_at < ?`
+    ).get(since) as { total: number };
+    let cum = baseline?.total ?? 0;
+
+    const closed = this.db.prepare(
+      `SELECT pnl_usd, closed_at FROM trades
+       WHERE status='closed' AND closed_at IS NOT NULL AND pnl_usd IS NOT NULL AND closed_at >= ?
+       ORDER BY closed_at ASC`
+    ).all(since) as Array<{ pnl_usd: number; closed_at: number }>;
+
+    const points: Array<{ timestamp: number; value: number }> = [
+      { timestamp: since, value: cum },
+    ];
+
+    for (const row of closed) {
+      cum += row.pnl_usd;
+      const last = points[points.length - 1]!;
+      if (last.timestamp === row.closed_at) {
+        last.value = cum;
+      } else {
+        points.push({ timestamp: row.closed_at, value: cum });
+      }
+    }
+
+    return points;
+  }
+
+  private mapTradeRow(r: Record<string, unknown>): {
     opportunityId: string; venue: string; asset: string; side: string;
     sizeUsd: number; fillPrice: number | null; exitPrice: number | null;
     feeUsd: number; pnlUsd: number | null; orderId: string | null;
     status: string; openedAt: number; closedAt: number | null;
-  }> {
-    return (this.db.prepare(
-      `SELECT opportunity_id, venue, asset, side, size_usd, fill_price, exit_price,
-              fee_usd, pnl_usd, order_id, status, opened_at, closed_at
-       FROM trades
-       WHERE opened_at >= ?
-       ORDER BY opened_at DESC LIMIT ?`
-    ).all(since, limit) as Array<Record<string, unknown>>).map((r) => ({
+  } {
+    return {
       opportunityId: r["opportunity_id"] as string,
       venue:         r["venue"] as string,
       asset:         r["asset"] as string,
@@ -140,7 +194,46 @@ export class Logger {
       status:        r["status"] as string,
       openedAt:      r["opened_at"] as number,
       closedAt:      r["closed_at"] as number | null,
-    }));
+    };
+  }
+
+  /** Trades with activity in the lookback window (opened or closed), paginated. */
+  getTradesPage(since: number, limit: number, offset: number): {
+    trades: Array<{
+      opportunityId: string; venue: string; asset: string; side: string;
+      sizeUsd: number; fillPrice: number | null; exitPrice: number | null;
+      feeUsd: number; pnlUsd: number | null; orderId: string | null;
+      status: string; openedAt: number; closedAt: number | null;
+    }>;
+    total: number;
+  } {
+    const windowClause = `(opened_at >= ? OR (closed_at IS NOT NULL AND closed_at >= ?))`;
+    const totalRow = this.db.prepare(
+      `SELECT COUNT(*) AS c FROM trades WHERE ${windowClause}`
+    ).get(since, since) as { c: number };
+
+    const rows = this.db.prepare(
+      `SELECT opportunity_id, venue, asset, side, size_usd, fill_price, exit_price,
+              fee_usd, pnl_usd, order_id, status, opened_at, closed_at
+       FROM trades
+       WHERE ${windowClause}
+       ORDER BY COALESCE(closed_at, opened_at) DESC
+       LIMIT ? OFFSET ?`
+    ).all(since, since, limit, offset) as Array<Record<string, unknown>>;
+
+    return {
+      trades: rows.map((r) => this.mapTradeRow(r)),
+      total: totalRow?.c ?? 0,
+    };
+  }
+
+  getTrades(limit = 50, since = 0): Array<{
+    opportunityId: string; venue: string; asset: string; side: string;
+    sizeUsd: number; fillPrice: number | null; exitPrice: number | null;
+    feeUsd: number; pnlUsd: number | null; orderId: string | null;
+    status: string; openedAt: number; closedAt: number | null;
+  }> {
+    return this.getTradesPage(since, limit, 0).trades;
   }
 
   getOpenTrades(): Array<{
@@ -219,6 +312,21 @@ export class Logger {
     }));
   }
 
+  // ── faucet ─────────────────────────────────────────────────────────────────
+  getFaucetLastMint(address: string): number | null {
+    const row = this.db.prepare(
+      `SELECT last_mint_ms FROM faucet_log WHERE address = ?`
+    ).get(address) as { last_mint_ms: number } | undefined;
+    return row?.last_mint_ms ?? null;
+  }
+
+  recordFaucetMint(address: string): void {
+    this.db.prepare(
+      `INSERT INTO faucet_log (address, last_mint_ms) VALUES (?, ?)
+       ON CONFLICT(address) DO UPDATE SET last_mint_ms = excluded.last_mint_ms`
+    ).run(address, Date.now());
+  }
+
   // ── events ─────────────────────────────────────────────────────────────────
   logEvent(severity: string, message: string, data?: unknown): void {
     const dataStr = data != null ? JSON.stringify(data) : null;
@@ -230,5 +338,10 @@ export class Logger {
     }
   }
 
-  close(): void { this.db.close(); }
+  close(): void {
+    if (this.syncTimer) { clearInterval(this.syncTimer); this.syncTimer = null; }
+    // Final push of any local writes to Turso before shutting down
+    try { this.db.sync(); } catch { /* best effort */ }
+    this.db.close();
+  }
 }

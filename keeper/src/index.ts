@@ -232,12 +232,14 @@ async function main() {
     log.info({ port: config.API_PORT }, "API server listening");
   });
 
-  process.on("SIGINT", async () => {
-    log.info("shutting down");
+  const shutdown = async (signal: string) => {
+    log.info({ signal }, "shutting down");
     for (const v of adapters.values()) await v.shutdown().catch(() => {});
-    logger.close();
+    logger.close();  // also pushes a final Turso sync if enabled
     process.exit(0);
-  });
+  };
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));  // Render sends SIGTERM
 }
 
 main().catch((e) => {
