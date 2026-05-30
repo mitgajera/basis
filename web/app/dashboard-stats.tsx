@@ -1,43 +1,71 @@
 "use client";
 
 import { useStats } from "../lib/api-client";
-import { StatCard } from "../components/StatCard";
 import { formatUsd } from "../lib/format";
+
+function MetricCell({
+  label,
+  value,
+  sub,
+  loading,
+}: {
+  label: string;
+  value: string;
+  sub?: React.ReactNode;
+  loading?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="metric-cell space-y-2">
+        <div className="skeleton h-2.5 w-12" />
+        <div className="skeleton h-7 w-20" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="metric-cell">
+      <p className="text-[12px] text-text-tertiary mb-1.5">{label}</p>
+      <p className="tabular-mono text-[22px] font-medium text-text-primary leading-none tracking-tight">{value}</p>
+      {sub && <div className="mt-1.5 text-[11px] tabular-mono text-text-disabled">{sub}</div>}
+    </div>
+  );
+}
 
 export function DashboardStats() {
   const { data: stats } = useStats();
+  const loading = stats == null;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <StatCard
-        label="Total Value Locked"
+    <div className="metrics-strip">
+      <MetricCell
+        label="Total value locked"
         value={stats?.tvl != null ? formatUsd(stats.tvl, { compact: true }) : "—"}
-        delta={stats?.apr24h != null && stats.apr24h !== 0
-          ? { value: `${stats.apr24h >= 0 ? "+" : ""}${stats.apr24h.toFixed(2)}%`, positive: stats.apr24h >= 0 }
-          : undefined}
-        helper={stats?.apr24h != null ? "24h APR" : undefined}
-        loading={stats == null}
-        accent
+        sub={
+          stats?.apr24h != null && stats.apr24h !== 0 ? (
+            <span className={stats.apr24h >= 0 ? "text-positive" : "text-negative"}>
+              {stats.apr24h >= 0 ? "+" : ""}
+              {stats.apr24h.toFixed(2)}% 24h APR
+            </span>
+          ) : undefined
+        }
+        loading={loading}
       />
-      <StatCard
-        label="7-Day APR"
+      <MetricCell
+        label="7-day APR"
         value={stats?.apr7d != null ? `${stats.apr7d >= 0 ? "+" : ""}${stats.apr7d.toFixed(2)}%` : "—"}
-        helper="annualized yield"
-        loading={stats == null}
+        loading={loading}
       />
-      <StatCard
-        label="Open Positions"
+      <MetricCell
+        label="Trades"
         value={stats?.totalTrades != null ? String(stats.totalTrades) : "—"}
-        helper={stats?.spreadOpportunities != null && stats.spreadOpportunities > 0
-          ? `${stats.spreadOpportunities} spreads seen`
-          : "sim mode"}
-        loading={stats == null}
+        sub={stats?.spreadOpportunities ? `${stats.spreadOpportunities} spreads seen` : undefined}
+        loading={loading}
       />
-      <StatCard
-        label="Uptime"
-        value={stats?.uptimePct != null ? `${stats.uptimePct.toFixed(0)}%` : "—"}
-        helper="keeper process"
-        loading={stats == null}
+      <MetricCell
+        label="Keeper uptime"
+        value={stats?.uptimePct != null ? `${stats.uptimePct.toFixed(1)}%` : "—"}
+        loading={loading}
       />
     </div>
   );

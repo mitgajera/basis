@@ -4,60 +4,49 @@ interface StatCardProps {
   delta?: { value: string; positive: boolean };
   helper?: string;
   loading?: boolean;
-  accent?: boolean;
+  inline?: boolean;
 }
 
-export function StatCard({ label, value, delta, helper, loading, accent }: StatCardProps) {
+export function StatCard({ label, value, delta, helper, loading, inline }: StatCardProps) {
   if (loading) {
+    const wrap = inline ? "metric-cell space-y-2" : "panel p-4 space-y-2.5";
     return (
-      <div className="rounded-xl border border-border-subtle bg-bg-surface p-4 space-y-3">
-        <div className="skeleton h-2 w-24 rounded" />
-        <div className="skeleton h-8 w-32 rounded" />
-        <div className="skeleton h-2.5 w-20 rounded" />
+      <div className={wrap}>
+        <div className="skeleton h-2 w-16" />
+        <div className="skeleton h-7 w-24" />
+      </div>
+    );
+  }
+
+  if (inline) {
+    return (
+      <div className="metric-cell">
+        <p className="text-[12px] text-text-tertiary mb-1.5">{label}</p>
+        <p className="tabular-mono text-[22px] font-medium text-text-primary leading-none tracking-tight">{value}</p>
+        {(delta || helper) && (
+          <p className="mt-1.5 text-[11px] tabular-mono text-text-disabled">
+            {delta && (
+              <span className={delta.positive ? "text-positive" : "text-negative"}>{delta.value}</span>
+            )}
+            {helper && <span className="ml-1">{helper}</span>}
+          </p>
+        )}
       </div>
     );
   }
 
   return (
-    <div
-      className={`relative rounded-xl p-4 overflow-hidden transition-all duration-200 glass-card hover:brightness-110 ${
-        accent ? "ring-1 ring-accent/10" : ""
-      }`}
-    >
-      {/* Accent glow top-left */}
-      {accent && (
-        <div
-          className="pointer-events-none absolute -top-8 -left-8 h-24 w-24 rounded-full opacity-[0.06]"
-          style={{ background: "radial-gradient(circle, var(--accent) 0%, transparent 70%)" }}
-        />
-      )}
-
-      {/* Left accent bar */}
-      {accent && (
-        <div className="absolute left-0 top-4 bottom-4 w-[2px] rounded-r-full bg-accent/50" />
-      )}
-
-      {/* Label */}
-      <p className="text-[10px] uppercase tracking-[0.12em] text-text-disabled font-medium mb-3 pl-px">
-        {label}
-      </p>
-
-      {/* Value */}
-      <p className={`tabular-mono font-semibold leading-none mb-2 tracking-tight ${
-        accent ? "text-[28px] text-text-primary" : "text-[24px] text-text-secondary"
-      }`}>
-        {value}
-      </p>
-
-      {/* Delta / helper */}
-      {delta ? (
-        <p className={`text-[11px] tabular-mono font-medium ${delta.positive ? "text-positive" : "text-negative"}`}>
-          {delta.value}
-          {helper && <span className="text-text-disabled font-normal ml-1.5">{helper}</span>}
+    <div className="panel p-4">
+      <p className="text-[12px] text-text-tertiary mb-1.5">{label}</p>
+      <p className="tabular-mono text-[22px] font-medium text-text-primary leading-none tracking-tight">{value}</p>
+      {(delta || helper) && (
+        <p className="mt-1.5 text-[11px] tabular-mono">
+          {delta && (
+            <span className={delta.positive ? "text-positive" : "text-negative"}>{delta.value}</span>
+          )}
+          {helper && <span className="text-text-disabled ml-1.5">{helper}</span>}
         </p>
-      ) : helper ? (
-        <p className="text-[11px] text-text-disabled">{helper}</p>
-      ) : null}
+      )}
     </div>
   );
 }

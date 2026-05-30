@@ -1,18 +1,31 @@
-export function formatUsd(value: number, opts?: { compact?: boolean }): string {
-  if (opts?.compact && Math.abs(value) >= 1000) {
-    return new Intl.NumberFormat("en-US", {
+export function formatUsd(value: number, opts?: { compact?: boolean; signed?: boolean }): string {
+  const prefix = opts?.signed && value > 0 ? "+" : "";
+  const abs = Math.abs(value);
+  const useCompact = opts?.compact === true && abs >= 1000;
+
+  if (useCompact && abs >= 1000) {
+    return (
+      prefix +
+      new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        notation: "compact",
+        maximumFractionDigits: 2,
+      }).format(value)
+    );
+  }
+
+  const maxFrac = abs < 1 ? 4 : 2;
+  const minFrac = abs < 1 ? 4 : 2;
+  return (
+    prefix +
+    new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-      notation: "compact",
-      maximumFractionDigits: 2,
-    }).format(value);
-  }
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+      minimumFractionDigits: minFrac,
+      maximumFractionDigits: maxFrac,
+    }).format(value)
+  );
 }
 
 export function formatPct(value: number, decimals = 2): string {
