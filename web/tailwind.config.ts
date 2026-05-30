@@ -30,7 +30,7 @@ const config: Config = {
         accent: {
           DEFAULT: "var(--accent)",
           hover:   "var(--accent-hover)",
-          bg:      "var(--accent-bg)",
+          muted:   "var(--accent-muted)",
           border:  "var(--accent-border)",
         },
         positive:      "var(--positive)",
@@ -41,8 +41,11 @@ const config: Config = {
         critical:      "var(--critical)",
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "Inter", "system-ui", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      fontSize: {
+        "2xs": ["10px", { lineHeight: "14px", letterSpacing: "0.02em" }],
       },
     },
   },
