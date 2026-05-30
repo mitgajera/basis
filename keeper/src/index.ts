@@ -232,8 +232,10 @@ async function main() {
     keeperKey: config.KEEPER_PRIVATE_KEY,
     usdcMint: config.USDC_MINT,
   });
-  api.listen(config.API_PORT, () => {
-    log.info({ port: config.API_PORT }, "API server listening");
+  // Bind to 0.0.0.0 explicitly. Newer Node defaults can bind only to ::1/127.0.0.1
+  // which Render's port scanner (which checks 0.0.0.0) can't see → deploy hangs.
+  api.listen(config.API_PORT, "0.0.0.0", () => {
+    log.info({ port: config.API_PORT, host: "0.0.0.0" }, "API server listening");
   });
 
   const shutdown = async (signal: string) => {
