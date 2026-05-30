@@ -21,14 +21,28 @@ const ASSET_NAME: Record<string, string> = {
   "DOGE-PERP": "DOGE",
 };
 
-async function hlPost<T>(body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(HL_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`Hyperliquid API ${res.status}`);
-  return res.json() as Promise<T>;
+async function hlPost<T>(body: Record<string, unknown>, attempts = 3, timeoutMs = 5_000): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await fetch(HL_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctl.signal,
+      });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`Hyperliquid API ${res.status}`);
+      return res.json() as Promise<T>;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 export class HyperliquidAdapter implements VenueAdapter {
@@ -37,19 +51,19 @@ export class HyperliquidAdapter implements VenueAdapter {
   private latestFunding = new Map<string, FundingRateInfo>();
   private fundingCallbacks = new Map<string, Set<(info: FundingRateInfo) => void>>();
   private markPriceCallbacks = new Map<string, Set<(price: number) => void>>();
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // metaAndAssetCtxs returns universe + contexts in index-aligned arrays
   private assetIndex = new Map<string, number>();
+  // Coalesce the per-asset getFundingRate() calls within a 30s tick onto one fetch.
+  private fetchInFlight: Promise<void> | null = null;
+  private lastFetchTs = 0;
+  private static readonly CACHE_TTL_MS = 10_000;
 
   async init(): Promise<void> {
-    await this._fetchAll();
-    this.pollTimer = setInterval(() => this._fetchAll().catch(() => {}), 30_000);
+    // First fetch is fired by the main index.ts poller — no internal timer needed.
   }
 
-  async shutdown(): Promise<void> {
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-  }
+  async shutdown(): Promise<void> {}
 
   async health(): Promise<{ ok: boolean; latencyMs: number; reason?: string }> {
     const t0 = Date.now();
@@ -62,7 +76,12 @@ export class HyperliquidAdapter implements VenueAdapter {
   }
 
   async getFundingRate(asset: string): Promise<FundingRateInfo> {
-    await this._fetchAll();
+    if (Date.now() - this.lastFetchTs > HyperliquidAdapter.CACHE_TTL_MS) {
+      if (!this.fetchInFlight) {
+        this.fetchInFlight = this._fetchAll().finally(() => { this.fetchInFlight = null; });
+      }
+      await this.fetchInFlight;
+    }
     const info = this.latestFunding.get(asset);
     if (!info) throw new Error(`Hyperliquid: no data for ${asset}`);
     return info;
@@ -147,5 +166,6 @@ export class HyperliquidAdapter implements VenueAdapter {
       for (const cb of this.fundingCallbacks.get(basisAsset) ?? []) cb(info);
       for (const cb of this.markPriceCallbacks.get(basisAsset) ?? []) cb(markPrice);
     }
+    this.lastFetchTs = Date.now();
   }
 }

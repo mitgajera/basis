@@ -15,6 +15,26 @@ const BASE_URL = "https://api.backpack.exchange";
 const WS_URL = "wss://ws.backpack.exchange";
 const WINDOW = 5000;
 
+// Backpack's edge occasionally drops a TCP connection mid-request; a single retry
+// with a tight timeout recovers without losing the 30s poll cycle.
+async function fetchWithRetry(url: string, init?: RequestInit, attempts = 3, timeoutMs = 5_000): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...init, signal: ctl.signal });
+      clearTimeout(t);
+      return res;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 const PERP_SYMBOLS = [
   "SOL_USDC_PERP", "BTC_USDC_PERP", "ETH_USDC_PERP",
   "HYPE_USDC_PERP", "SUI_USDC_PERP", "DOGE_USDC_PERP",
@@ -58,7 +78,7 @@ export class BackpackAdapter implements VenueAdapter {
 
   async getFundingRate(asset: string): Promise<FundingRateInfo> {
     const symbol = this._toSymbol(asset);
-    const res = await fetch(`${BASE_URL}/api/v1/markPrices?symbol=${encodeURIComponent(symbol)}`);
+    const res = await fetchWithRetry(`${BASE_URL}/api/v1/markPrices?symbol=${encodeURIComponent(symbol)}`);
     if (!res.ok) throw new Error(`Backpack getFundingRate failed: ${res.status}`);
     const rows = (await res.json()) as Array<{
       fundingRate: string;
