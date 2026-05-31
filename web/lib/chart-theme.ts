@@ -47,17 +47,18 @@ export function basisChartOptions(
     },
     rightPriceScale: {
       borderVisible: false,
-      scaleMargins: { top: 0.16, bottom: 0.12 },
-      minimumWidth: 58,
+      scaleMargins: { top: 0.18, bottom: 0.14 },
+      minimumWidth: 64,
       autoScale: true,
     },
     timeScale: {
       borderVisible: false,
       timeVisible: true,
       secondsVisible: false,
-      rightOffset: 10,
-      barSpacing: 7,
+      rightOffset: 12,
+      barSpacing: 8,
       minBarSpacing: 4,
+      uniformDistribution: true,
     },
     handleScroll: { vertTouchDrag: false },
     handleScale: { axisPressedMouseMove: { time: true, price: true } },
@@ -94,7 +95,29 @@ export function basisLineSeriesOptions(
     lastValueVisible: options?.lastValue ?? true,
     priceLineVisible: false,
     crosshairMarkerVisible: true,
-    crosshairMarkerRadius: 5,
+    crosshairMarkerRadius: 4,
+    crosshairMarkerBorderColor: color,
+    crosshairMarkerBorderWidth: 2,
+    crosshairMarkerBackgroundColor: CHART.markerBg,
+    lineVisible: true,
+  };
+}
+
+export function basisPnlAreaOptions(positive: boolean, formatter: (v: number) => string) {
+  const color = positive ? CHART.positive : CHART.negative;
+  const top = positive ? "rgba(52, 211, 153, 0.28)" : "rgba(248, 113, 113, 0.26)";
+  const bottom = positive ? "rgba(52, 211, 153, 0)" : "rgba(248, 113, 113, 0)";
+  return {
+    lineColor: color,
+    topColor: top,
+    bottomColor: bottom,
+    lineWidth: 2 as const,
+    lineType: 2 as const,
+    priceFormat: { type: "custom" as const, formatter },
+    lastValueVisible: true,
+    priceLineVisible: false,
+    crosshairMarkerVisible: true,
+    crosshairMarkerRadius: 4,
     crosshairMarkerBorderColor: color,
     crosshairMarkerBorderWidth: 2,
     crosshairMarkerBackgroundColor: CHART.markerBg,

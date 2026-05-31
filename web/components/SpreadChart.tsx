@@ -9,6 +9,7 @@ import {
   SPREAD_PAIR_COLORS,
 } from "../lib/chart-theme";
 import { useChartCrosshair } from "../hooks/useChartCrosshair";
+import { useLiveDots, type LiveDotsSeriesEntry } from "../hooks/useLiveDots";
 import type { Asset } from "./AssetPicker";
 import { ChartFrame } from "./ChartFrame";
 import { ChartLegend, type LegendItem } from "./ChartLegend";
@@ -31,6 +32,25 @@ type ChartApi = {
 };
 
 const CHART_H = 200;
+const DRAW_MS = 750;
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+function animateSpreadDraw(
+  series: SeriesApi,
+  values: Array<{ time: number; value: number }>
+): { cancel: () => void } {
+  if (values.length === 0) return { cancel: () => {} };
+  let rafId = 0;
+  const startTs = performance.now();
+  const tick = (now: number) => {
+    const t = Math.min(1, (now - startTs) / DRAW_MS);
+    const n = Math.max(1, Math.ceil(values.length * easeOut(t)));
+    series.setData(values.slice(0, n));
+    if (t < 1) rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+  return { cancel: () => cancelAnimationFrame(rafId) };
+}
 
 export function SpreadChart({ asset }: { asset: Asset }) {
   const { data: live } = useSpreads(asset);
@@ -42,8 +62,11 @@ export function SpreadChart({ asset }: { asset: Asset }) {
   const [chartApi, setChartApi] = useState<ChartApi | null>(null);
   const seriesMap = useRef<Map<string, SeriesApi>>(new Map());
   const seriesColors = useRef<Map<string, string>>(new Map());
+  const seriesLastPoint = useRef<Map<string, { time: number; value: number }>>(new Map());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [seriesVersion, setSeriesVersion] = useState(0);
+  const lastSigRef = useRef<string>("");
+  const animationsRef = useRef<Array<{ cancel: () => void }>>([]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -78,6 +101,9 @@ export function SpreadChart({ asset }: { asset: Asset }) {
     const chart = chartApiRef.current;
     if (!chart) return;
 
+    for (const a of animationsRef.current) a.cancel();
+    animationsRef.current = [];
+
     for (const s of Array.from(seriesMap.current.values())) {
       try {
         chart.removeSeries(s);
@@ -87,6 +113,11 @@ export function SpreadChart({ asset }: { asset: Asset }) {
     }
     seriesMap.current.clear();
     seriesColors.current.clear();
+    seriesLastPoint.current.clear();
+
+    const sig = asset;
+    const shouldAnimate = sig !== lastSigRef.current;
+    lastSigRef.current = sig;
 
     const allPts: SpreadPoint[] = [...(history ?? []), ...(live ?? [])];
     const byPair = new Map<string, { time: number; value: number }[]>();
@@ -110,9 +141,15 @@ export function SpreadChart({ asset }: { asset: Asset }) {
       const s = chart.addLineSeries(
         basisLineSeriesOptions(color, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`, { lastValue: false })
       );
-      s.setData(points);
+      if (shouldAnimate) {
+        animationsRef.current.push(animateSpreadDraw(s, points));
+      } else {
+        s.setData(points);
+      }
       seriesMap.current.set(key, s);
       seriesColors.current.set(key, color);
+      const last = points[points.length - 1];
+      if (last) seriesLastPoint.current.set(key, last);
       if (!firstSeries) firstSeries = s;
     }
 
@@ -164,6 +201,24 @@ export function SpreadChart({ asset }: { asset: Asset }) {
     formatValue
   );
 
+  const liveDotsEntries: LiveDotsSeriesEntry[] = useMemo(
+    () =>
+      Array.from(seriesMap.current.entries()).map(([id, series]) => ({
+        id,
+        color: seriesColors.current.get(id) ?? CHART.accent,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        series: series as any,
+        lastPoint: seriesLastPoint.current.get(id) ?? null,
+        hidden: hidden.has(id),
+      })),
+    [seriesVersion, hidden]
+  );
+
+  const liveDots = useLiveDots(
+    chartApi as import("../hooks/useLiveDots").LiveDotsChartApi | null,
+    liveDotsEntries
+  );
+
   const pairs =
     (live as SpreadPoint[] | undefined)?.map((s, i) => ({
       id: `${s.longVenue} / ${s.shortVenue}`,
@@ -186,7 +241,13 @@ export function SpreadChart({ asset }: { asset: Asset }) {
         <p className="text-[13px] font-medium text-text-secondary">Pairwise spreads</p>
       </div>
 
-      <ChartFrame chartRef={chartRef} containerRef={containerRef} height={CHART_H} tooltip={tooltip} />
+      <ChartFrame
+        chartRef={chartRef}
+        containerRef={containerRef}
+        height={CHART_H}
+        tooltip={tooltip}
+        liveDots={liveDots}
+      />
 
       {legendItems.length > 0 && (
         <div className="px-4 py-2.5 border-t border-border-subtle">

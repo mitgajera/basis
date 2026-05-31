@@ -9,12 +9,32 @@ import {
   navAutoscaleProvider,
 } from "../lib/chart-theme";
 import { useChartCrosshair } from "../hooks/useChartCrosshair";
+import { useLiveDots, type LiveDotsSeriesEntry } from "../hooks/useLiveDots";
 import { ChartFrame } from "./ChartFrame";
 import { SegmentedControl } from "./SegmentedControl";
 
 const RANGES = ["24h", "7d", "30d", "All"] as const;
 type Range = (typeof RANGES)[number];
 const CHART_H = 220;
+const DRAW_MS = 800;
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+function animateNavDraw(
+  series: { setData(d: Array<{ time: number; value: number }>): void },
+  values: Array<{ time: number; value: number }>
+): { cancel: () => void } {
+  if (values.length === 0) return { cancel: () => {} };
+  let rafId = 0;
+  const startTs = performance.now();
+  const tick = (now: number) => {
+    const t = Math.min(1, (now - startTs) / DRAW_MS);
+    const n = Math.max(2, Math.ceil(values.length * easeOut(t)));
+    series.setData(values.slice(0, n));
+    if (t < 1) rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+  return { cancel: () => cancelAnimationFrame(rafId) };
+}
 
 export function NavChart() {
   const chartRef = useRef<HTMLDivElement>(null);
@@ -26,6 +46,10 @@ export function NavChart() {
 
   const { data } = useNav();
   const [range, setRange] = useState<Range>("7d");
+  const lastSigRef = useRef<string>("");
+  const animationRef = useRef<{ cancel: () => void } | null>(null);
+  const lastPointRef = useRef<{ time: number; value: number } | null>(null);
+  const [lastPointVersion, setLastPointVersion] = useState(0);
 
   const history: Array<{ timestamp: number; navPerShare: number }> = data?.history ?? [];
   const current: number = data?.snapshot?.navPerShare ?? data?.snapshot?.nav_per_share ?? 1;
@@ -97,8 +121,23 @@ export function NavChart() {
       sorted = [{ time: sorted[0]!.time - 60, value: sorted[0]!.value }, ...sorted];
     }
 
-    series.setData(sorted);
+    animationRef.current?.cancel();
+    animationRef.current = null;
+
+    const sig = range;
+    const shouldAnimate = sig !== lastSigRef.current;
+    lastSigRef.current = sig;
+
+    if (shouldAnimate) {
+      animationRef.current = animateNavDraw(series, sorted);
+    } else {
+      series.setData(sorted);
+    }
     (chartApiRef.current as { timeScale(): { fitContent(): void } } | null)?.timeScale().fitContent();
+
+    const last = sorted[sorted.length - 1];
+    lastPointRef.current = last ? { time: last.time, value: last.value } : null;
+    setLastPointVersion((v) => v + 1);
   }, [history, range, chartApi]);
 
   const seriesMeta = useMemo(
@@ -116,6 +155,27 @@ export function NavChart() {
     seriesMeta,
     containerRef,
     formatNavValue
+  );
+
+  const liveDotsEntries: LiveDotsSeriesEntry[] = useMemo(
+    () =>
+      seriesReady && areaSeriesRef.current && lastPointRef.current
+        ? [
+            {
+              id: "nav",
+              color: CHART.accent,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              series: areaSeriesRef.current as any,
+              lastPoint: lastPointRef.current,
+            },
+          ]
+        : [],
+    [seriesReady, lastPointVersion]
+  );
+
+  const liveDots = useLiveDots(
+    chartApi as import("../hooks/useLiveDots").LiveDotsChartApi | null,
+    liveDotsEntries
   );
 
   return (
@@ -147,7 +207,13 @@ export function NavChart() {
           onChange={setRange}
         />
       </div>
-      <ChartFrame chartRef={chartRef} containerRef={containerRef} height={CHART_H} tooltip={tooltip} />
+      <ChartFrame
+        chartRef={chartRef}
+        containerRef={containerRef}
+        height={CHART_H}
+        tooltip={tooltip}
+        liveDots={liveDots}
+      />
     </div>
   );
 }

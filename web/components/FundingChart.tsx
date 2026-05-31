@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFundingRates, useFundingRateHistory, usePnlHistory } from "../lib/api-client";
 import { formatUsd } from "../lib/format";
-import { basisChartOptions, basisLineSeriesOptions, CHART } from "../lib/chart-theme";
+import { basisChartOptions, basisLineSeriesOptions, basisPnlAreaOptions, CHART } from "../lib/chart-theme";
 import { useChartCrosshair } from "../hooks/useChartCrosshair";
+import { useLiveDots, type LiveDotsSeriesEntry } from "../hooks/useLiveDots";
 import type { Asset } from "./AssetPicker";
 import { ChartFrame } from "./ChartFrame";
 import { ChartLegend, type LegendItem } from "./ChartLegend";
@@ -28,6 +29,7 @@ type SeriesApi = {
 };
 type ChartApi = {
   addLineSeries(o: unknown): SeriesApi;
+  addAreaSeries(o: unknown): SeriesApi;
   removeSeries(s: unknown): void;
   timeScale(): {
     fitContent(): void;
@@ -38,6 +40,44 @@ type ChartApi = {
 };
 
 const CHART_H = 300;
+const DRAW_MS = 1500;
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+type DataPoint = { time: number; value: number };
+
+/**
+ * Progressively reveal a series left-to-right by growing the slice of value
+ * points over DRAW_MS, while keeping the cutoff/nowAnchor whitespace points so
+ * the x-axis range stays locked to the user's lookback selection.
+ */
+function animateSeriesDraw(
+  series: SeriesApi,
+  values: DataPoint[],
+  cutoff: number,
+  nowAnchor: number
+): { cancel: () => void } {
+  if (values.length === 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    series.setData([{ time: cutoff }, { time: nowAnchor }] as any);
+    return { cancel: () => {} };
+  }
+  let rafId = 0;
+  const startTs = performance.now();
+  const tick = (now: number) => {
+    const t = Math.min(1, (now - startTs) / DRAW_MS);
+    const n = Math.max(1, Math.ceil(values.length * easeOut(t)));
+    const slice = values.slice(0, n);
+    const arr: Array<{ time: number; value?: number }> = [];
+    if (slice[0]!.time > cutoff) arr.push({ time: cutoff });
+    arr.push(...slice);
+    if (slice[slice.length - 1]!.time < nowAnchor) arr.push({ time: nowAnchor });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    series.setData(arr as any);
+    if (t < 1) rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+  return { cancel: () => cancelAnimationFrame(rafId) };
+}
 
 export function FundingChart({ asset }: { asset: Asset }) {
   const [tab, setTab] = useState<Tab>("funding");
@@ -55,7 +95,10 @@ export function FundingChart({ asset }: { asset: Asset }) {
   const [chartApi, setChartApi] = useState<ChartApi | null>(null);
   const seriesMap = useRef<Map<string, SeriesApi>>(new Map());
   const seriesColors = useRef<Map<string, string>>(new Map());
+  const seriesLastPoint = useRef<Map<string, { time: number; value: number }>>(new Map());
   const [seriesVersion, setSeriesVersion] = useState(0);
+  const hasAnimatedRef = useRef<boolean>(false);
+  const animationsRef = useRef<Array<{ cancel: () => void }>>([]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -90,6 +133,10 @@ export function FundingChart({ asset }: { asset: Asset }) {
     const chart = chartApiRef.current;
     if (!chart) return;
 
+    // Cancel any in-flight draw animations from a previous effect run
+    for (const a of animationsRef.current) a.cancel();
+    animationsRef.current = [];
+
     for (const s of Array.from(seriesMap.current.values())) {
       try {
         chart.removeSeries(s);
@@ -99,10 +146,16 @@ export function FundingChart({ asset }: { asset: Asset }) {
     }
     seriesMap.current.clear();
     seriesColors.current.clear();
+    seriesLastPoint.current.clear();
 
     const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
     const nowAnchor = Math.floor(Date.now() / 1000);
     let firstSeries: SeriesApi | null = null;
+
+    // Animate the draw only on first successful mount. Subsequent changes
+    // (tab / lookback / asset) and background data polls render directly.
+    const shouldAnimate = !hasAnimatedRef.current;
+    hasAnimatedRef.current = true;
 
     if (tab === "funding") {
       const pts: FundingPoint[] = [...(history ?? []), ...(live ?? [])];
@@ -118,21 +171,25 @@ export function FundingChart({ asset }: { asset: Asset }) {
         const deduped = Array.from(new Map(rawPts.map((p) => [p.time, p])).values()).sort((a, b) => a.time - b.time);
         const points =
           deduped.length === 1 ? [{ time: deduped[0]!.time - 60, value: deduped[0]!.value }, ...deduped] : deduped;
-        // Pad with whitespace anchors at cutoff/now so the x-axis spans the full lookback
-        // even when data covers only part of it. Whitespace = { time } without value.
-        const firstT = points[0]?.time;
-        const lastT = points[points.length - 1]?.time;
-        const withAnchors: Array<{ time: number; value?: number }> = [...points];
-        if (firstT == null || firstT > cutoff) withAnchors.unshift({ time: cutoff });
-        if (lastT == null || lastT < nowAnchor) withAnchors.push({ time: nowAnchor });
         const color = VENUE_CHART_COLORS[venue] ?? "#55555F";
         const s = chart.addLineSeries(
           basisLineSeriesOptions(color, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`)
         );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        s.setData(withAnchors as any);
+        if (shouldAnimate) {
+          animationsRef.current.push(animateSeriesDraw(s, points, cutoff, nowAnchor));
+        } else {
+          const firstT = points[0]?.time;
+          const lastT = points[points.length - 1]?.time;
+          const withAnchors: Array<{ time: number; value?: number }> = [...points];
+          if (firstT == null || firstT > cutoff) withAnchors.unshift({ time: cutoff });
+          if (lastT == null || lastT < nowAnchor) withAnchors.push({ time: nowAnchor });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          s.setData(withAnchors as any);
+        }
         seriesMap.current.set(venue, s);
         seriesColors.current.set(venue, color);
+        const last = points[points.length - 1];
+        if (last) seriesLastPoint.current.set(venue, last);
         if (!firstSeries) firstSeries = s;
       }
     } else {
@@ -165,13 +222,20 @@ export function FundingChart({ asset }: { asset: Asset }) {
       }
 
       const lastVal = pnlPts[pnlPts.length - 1]!.value;
-      const color = lastVal >= 0 ? CHART.positive : CHART.negative;
-      const s = chart.addLineSeries(
-        basisLineSeriesOptions(color, (v) => formatUsd(v, { signed: true }))
+      const positive = lastVal >= 0;
+      const color = positive ? CHART.positive : CHART.negative;
+      const s = chart.addAreaSeries(
+        basisPnlAreaOptions(positive, (v) => formatUsd(v, { signed: true }))
       );
-      s.setData(pnlPts);
+      if (shouldAnimate) {
+        animationsRef.current.push(animateSeriesDraw(s, pnlPts, cutoff, nowAnchor));
+      } else {
+        s.setData(pnlPts);
+      }
       seriesMap.current.set("__pnl__", s);
       seriesColors.current.set("__pnl__", color);
+      const lastPnl = pnlPts[pnlPts.length - 1];
+      if (lastPnl) seriesLastPoint.current.set("__pnl__", lastPnl);
       firstSeries = s;
     }
 
@@ -229,6 +293,24 @@ export function FundingChart({ asset }: { asset: Asset }) {
     formatValue
   );
 
+  const liveDotsEntries: LiveDotsSeriesEntry[] = useMemo(
+    () =>
+      Array.from(seriesMap.current.entries()).map(([id, series]) => ({
+        id,
+        color: seriesColors.current.get(id) ?? CHART.accent,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        series: series as any,
+        lastPoint: seriesLastPoint.current.get(id) ?? null,
+        hidden: hidden.has(id),
+      })),
+    [seriesVersion, hidden]
+  );
+
+  const liveDots = useLiveDots(
+    chartApi as import("../hooks/useLiveDots").LiveDotsChartApi | null,
+    liveDotsEntries
+  );
+
   const liveRates: FundingPoint[] = (live as FundingPoint[]) ?? [];
 
   const legendItems: LegendItem[] = useMemo(() => {
@@ -265,7 +347,13 @@ export function FundingChart({ asset }: { asset: Asset }) {
         />
       </div>
 
-      <ChartFrame chartRef={chartRef} containerRef={containerRef} height={CHART_H} tooltip={tooltip} />
+      <ChartFrame
+        chartRef={chartRef}
+        containerRef={containerRef}
+        height={CHART_H}
+        tooltip={tooltip}
+        liveDots={liveDots}
+      />
 
       <div className="px-4 py-2.5 border-t border-border-subtle min-h-[40px] flex items-center">
         {tab === "funding" ? (
