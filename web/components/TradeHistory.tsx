@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { TRADES_LOOKBACK_MS, usePositions, useTradesPage, type TradeRecord } from "../lib/api-client";
+import { useMemo, useState } from "react";
+import { useAllTrades, usePositions, type TradeRecord } from "../lib/api-client";
 import { formatUsd, formatRelativeTime } from "../lib/format";
 import { VenueLogo } from "./VenueLogo";
 
@@ -36,14 +36,21 @@ function legPnl(
 }
 
 export function TradeHistory() {
-  const { data, error, isLoading } = useTradesPage(1, PAGE_SIZE);
+  const { data, error, isLoading } = useAllTrades();
   const { data: positions } = usePositions();
+  const [page, setPage] = useState(1);
 
   // Defensive: old keeper returns Array<TradeRecord>, new keeper returns { trades, total, ... }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw = data as any;
-  const trades: TradeRecord[] = Array.isArray(raw) ? raw : raw?.trades ?? [];
-  const total: number = Array.isArray(raw) ? raw.length : raw?.total ?? 0;
+  const allTrades: TradeRecord[] = Array.isArray(raw) ? raw : raw?.trades ?? [];
+  const total: number = allTrades.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const trades = allTrades.slice(start, start + PAGE_SIZE);
+  const totalOpen = allTrades.filter((t) => t.status === "open").length;
+  const totalClosed = allTrades.filter((t) => t.status === "closed").length;
 
   const unrealizedByLeg = useMemo(() => {
     const m = new Map<string, number>();
@@ -60,9 +67,6 @@ export function TradeHistory() {
     return m;
   }, [positions]);
 
-  const openOnPage = trades.filter((t) => t.status === "open").length;
-  const closedOnPage = trades.filter((t) => t.status === "closed").length;
-
   return (
     <div className="panel overflow-hidden">
       <div className="panel-header flex flex-wrap items-center justify-between gap-2">
@@ -73,12 +77,10 @@ export function TradeHistory() {
         {total > 0 && (
           <span className="tabular-mono text-[11px] text-text-disabled">
             {total} legs
-            {openOnPage + closedOnPage > 0 && total <= PAGE_SIZE && (
-              <span className="text-text-disabled/80">
-                {" "}
-                · {openOnPage} open · {closedOnPage} closed
-              </span>
-            )}
+            <span className="text-text-disabled/80">
+              {" "}
+              · {totalOpen} open · {totalClosed} closed
+            </span>
           </span>
         )}
       </div>
@@ -185,6 +187,36 @@ export function TradeHistory() {
             </table>
           </div>
 
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-border-subtle">
+              <span className="tabular-mono text-[11px] text-text-disabled">
+                {start + 1}–{Math.min(start + PAGE_SIZE, total)} of {total}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="pct-chip disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Previous page"
+                >
+                  Prev
+                </button>
+                <span className="tabular-mono text-[11px] text-text-tertiary px-1">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="pct-chip disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Next page"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

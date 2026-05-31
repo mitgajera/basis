@@ -77,6 +77,14 @@ export function useTradesPage(page: number, pageSize = 25) {
   );
 }
 
+export function useAllTrades(lookbackMs = TRADES_LOOKBACK_MS) {
+  return useSWR<TradesPageResponse>(
+    `${API}/api/trades?lookback=${lookbackMs}&limit=10000&offset=0`,
+    fetcher,
+    { refreshInterval: 10_000, revalidateOnFocus: false }
+  );
+}
+
 export interface PnlHistoryResponse {
   points: Array<{ timestamp: number; value: number }>;
   realized: number;
