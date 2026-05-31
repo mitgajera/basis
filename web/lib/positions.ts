@@ -18,13 +18,13 @@ export function groupByOpportunity(positions: KeeperPosition[]): Map<string, Kee
   return map;
 }
 
-/** e.g. "SOL · backpack / pacifica" */
+/** e.g. "SOL · backpack long / pacifica short" */
 export function spreadLabel(legs: KeeperPosition[]): string {
   const asset = (legs[0]?.asset ?? "").replace("-PERP", "") || "—";
   const longVenue = legs.find((l) => l.side === "long")?.venue;
   const shortVenue = legs.find((l) => l.side === "short")?.venue;
   if (longVenue && shortVenue) {
-    return `${asset} · ${longVenue} / ${shortVenue}`;
+    return `${asset} · ${longVenue} long / ${shortVenue} short`;
   }
   if (legs.length === 1) {
     return `${asset} · ${legs[0]!.venue} ${legs[0]!.side}`;
