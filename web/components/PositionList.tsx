@@ -2,6 +2,7 @@
 
 import { usePositions } from "../lib/api-client";
 import { formatUsd } from "../lib/format";
+import { EmptyState } from "./EmptyState";
 import { VenueBadge } from "./VenueBadge";
 
 export function PositionList() {
@@ -28,29 +29,18 @@ export function PositionList() {
       </div>
 
       {error ? (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <p className="text-[12px] text-text-disabled">Keeper unreachable</p>
-        </div>
+        <EmptyState
+          tone="negative"
+          title="Keeper unreachable"
+          description="The keeper API didn't respond. Live data is paused."
+          className="flex-1"
+        />
       ) : positions.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-12 px-6 text-center gap-3">
-          <div className="flex gap-1">
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="w-1 h-1 rounded-full bg-text-disabled live-dot"
-                style={{ animationDelay: `${i * 0.25}s` }}
-              />
-            ))}
-          </div>
-          <p className="text-[13px] text-text-secondary font-medium">
-            {data ? "No open positions" : "Loading…"}
-          </p>
-          {data && (
-            <p className="text-[11px] text-text-disabled max-w-[240px] leading-relaxed">
-              Scanning cross-venue spreads for entry above threshold
-            </p>
-          )}
-        </div>
+        <EmptyState
+          title={data ? "No open positions" : "Loading…"}
+          description={data ? "Scanning cross-venue spreads for entry above threshold." : undefined}
+          className="flex-1"
+        />
       ) : (
         <>
           <div className="grid grid-cols-[1fr_48px_76px_76px_72px] border-b border-white/[0.04]">
