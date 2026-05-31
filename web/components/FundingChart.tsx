@@ -29,7 +29,10 @@ type SeriesApi = {
 type ChartApi = {
   addLineSeries(o: unknown): SeriesApi;
   removeSeries(s: unknown): void;
-  timeScale(): { fitContent(): void };
+  timeScale(): {
+    fitContent(): void;
+    setVisibleRange(r: { from: number; to: number }): void;
+  };
   applyOptions(o: unknown): void;
   remove(): void;
 };
@@ -98,6 +101,7 @@ export function FundingChart({ asset }: { asset: Asset }) {
     seriesColors.current.clear();
 
     const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
+    const nowAnchor = Math.floor(Date.now() / 1000);
     let firstSeries: SeriesApi | null = null;
 
     if (tab === "funding") {
@@ -114,11 +118,19 @@ export function FundingChart({ asset }: { asset: Asset }) {
         const deduped = Array.from(new Map(rawPts.map((p) => [p.time, p])).values()).sort((a, b) => a.time - b.time);
         const points =
           deduped.length === 1 ? [{ time: deduped[0]!.time - 60, value: deduped[0]!.value }, ...deduped] : deduped;
+        // Pad with whitespace anchors at cutoff/now so the x-axis spans the full lookback
+        // even when data covers only part of it. Whitespace = { time } without value.
+        const firstT = points[0]?.time;
+        const lastT = points[points.length - 1]?.time;
+        const withAnchors: Array<{ time: number; value?: number }> = [...points];
+        if (firstT == null || firstT > cutoff) withAnchors.unshift({ time: cutoff });
+        if (lastT == null || lastT < nowAnchor) withAnchors.push({ time: nowAnchor });
         const color = VENUE_CHART_COLORS[venue] ?? "#55555F";
         const s = chart.addLineSeries(
           basisLineSeriesOptions(color, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`)
         );
-        s.setData(points);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        s.setData(withAnchors as any);
         seriesMap.current.set(venue, s);
         seriesColors.current.set(venue, color);
         if (!firstSeries) firstSeries = s;

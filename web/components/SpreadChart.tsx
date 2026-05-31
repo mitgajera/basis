@@ -22,7 +22,10 @@ type SeriesApi = {
 type ChartApi = {
   addLineSeries(o: unknown): SeriesApi;
   removeSeries(s: unknown): void;
-  timeScale(): { fitContent(): void };
+  timeScale(): {
+    fitContent(): void;
+    setVisibleRange(r: { from: number; to: number }): void;
+  };
   applyOptions(o: unknown): void;
   remove(): void;
 };
