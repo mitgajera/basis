@@ -22,7 +22,6 @@ keeper/data/
 
 # Build artifacts
 *.tsbuildinfo
-web/idl/
 # Stray compiled JS next to TS sources (if someone runs `tsc` without outDir)
 keeper/src/**/*.js
 keeper/src/**/*.d.ts
