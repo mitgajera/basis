@@ -12,8 +12,12 @@ export default function DashboardPage() {
       <div className="space-y-5">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-[20px] font-semibold tracking-[-0.03em] text-text-primary">Overview</h1>
-            <p className="section-label mt-1">Cross-venue funding rate vault</p>
+            <h1 className="text-[22px] font-semibold tracking-[-0.035em] text-text-primary">
+              Overview
+            </h1>
+            <p className="section-label mt-1">
+              Delta-neutral funding-rate yield · cross-venue
+            </p>
           </div>
           <Link href="/vault" className="btn-primary h-9 px-4 hidden sm:inline-flex items-center shrink-0">
             Deposit
