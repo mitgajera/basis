@@ -99,6 +99,13 @@ export function useHealth() {
   });
 }
 
+export function useUptime() {
+  return useSWR<{ uptime24h: number | null }>(`/api/uptime`, fetcher, {
+    refreshInterval: 60_000,
+    revalidateOnFocus: false,
+  });
+}
+
 export function useSettlement() {
   return useSWR(`${API}/api/settlement`, fetcher, {
     refreshInterval: 15_000,
