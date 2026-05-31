@@ -3,19 +3,14 @@
 import { useMemo, useState } from "react";
 import { useAllTrades, usePositions, type TradeRecord } from "../lib/api-client";
 import { formatUsd, formatRelativeTime } from "../lib/format";
+import { AssetIcon } from "./AssetIcon";
+import { EmptyState } from "./EmptyState";
 import { VenueLogo } from "./VenueLogo";
 
 const PAGE_SIZE = 25;
 
-const STATUS: Record<string, { label: string; className: string }> = {
-  open:   { label: "open",   className: "text-accent bg-accent-muted" },
-  closed: { label: "closed", className: "text-text-tertiary bg-white/[0.04]" },
-  failed: { label: "failed", className: "text-negative bg-negative-bg" },
-  filled: { label: "filled", className: "text-positive bg-positive-bg" },
-  simulated: { label: "sim", className: "text-warning bg-warning/10" },
-};
-
-const COLS = ["Time", "Asset", "Venue", "Side", "Size", "Entry", "PnL", "Status"];
+type SortKey = "time" | "size" | "pnl";
+type SortDir = "asc" | "desc";
 
 function tradeTime(t: TradeRecord): number {
   return t.closedAt ?? t.openedAt;
@@ -35,22 +30,39 @@ function legPnl(
   return { value: null, isUnrealized: false };
 }
 
+function pnlSortValue(t: TradeRecord, unrealizedByLeg: Map<string, number>): number {
+  const { value } = legPnl(t, unrealizedByLeg);
+  return value == null ? -Infinity : value;
+}
+
+interface ColDef {
+  key: string;
+  label: string;
+  align: "left" | "right";
+  sortKey?: SortKey;
+}
+
+const COLS: ColDef[] = [
+  { key: "time", label: "Time", align: "left", sortKey: "time" },
+  { key: "asset", label: "Asset", align: "left" },
+  { key: "venue", label: "Venue", align: "left" },
+  { key: "side", label: "Side", align: "right" },
+  { key: "size", label: "Size", align: "right", sortKey: "size" },
+  { key: "entry", label: "Entry", align: "right" },
+  { key: "pnl", label: "PnL", align: "right", sortKey: "pnl" },
+  { key: "status", label: "Status", align: "right" },
+];
+
 export function TradeHistory() {
   const { data, error, isLoading } = useAllTrades();
   const { data: positions } = usePositions();
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<SortKey>("time");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // Defensive: old keeper returns Array<TradeRecord>, new keeper returns { trades, total, ... }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const raw = data as any;
-  const allTrades: TradeRecord[] = Array.isArray(raw) ? raw : raw?.trades ?? [];
-  const total: number = allTrades.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const trades = allTrades.slice(start, start + PAGE_SIZE);
-  const totalOpen = allTrades.filter((t) => t.status === "open").length;
-  const totalClosed = allTrades.filter((t) => t.status === "closed").length;
+  const allTradesRaw: TradeRecord[] = Array.isArray(raw) ? raw : raw?.trades ?? [];
 
   const unrealizedByLeg = useMemo(() => {
     const m = new Map<string, number>();
@@ -67,6 +79,44 @@ export function TradeHistory() {
     return m;
   }, [positions]);
 
+  const allTrades = useMemo(() => {
+    const out = [...allTradesRaw];
+    out.sort((a, b) => {
+      let av = 0;
+      let bv = 0;
+      if (sortKey === "time") {
+        av = tradeTime(a);
+        bv = tradeTime(b);
+      } else if (sortKey === "size") {
+        av = a.sizeUsd;
+        bv = b.sizeUsd;
+      } else {
+        av = pnlSortValue(a, unrealizedByLeg);
+        bv = pnlSortValue(b, unrealizedByLeg);
+      }
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+    return out;
+  }, [allTradesRaw, sortKey, sortDir, unrealizedByLeg]);
+
+  const total = allTrades.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const trades = allTrades.slice(start, start + PAGE_SIZE);
+  const totalOpen = allTradesRaw.filter((t) => t.status === "open").length;
+  const totalClosed = allTradesRaw.filter((t) => t.status === "closed").length;
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+    setPage(1);
+  };
+
   return (
     <div className="panel overflow-hidden">
       <div className="panel-header flex flex-wrap items-center justify-between gap-2">
@@ -77,56 +127,65 @@ export function TradeHistory() {
         {total > 0 && (
           <span className="tabular-mono text-[11px] text-text-disabled">
             {total} legs
-            <span className="text-text-disabled/80">
-              {" "}
-              · {totalOpen} open · {totalClosed} closed
-            </span>
+            <span className="text-text-disabled/80"> · {totalOpen} open · {totalClosed} closed</span>
           </span>
         )}
       </div>
 
       {error ? (
-        <p className="text-[12px] text-text-disabled p-6 text-center">Keeper unreachable</p>
+        <EmptyState
+          tone="negative"
+          title="Keeper unreachable"
+          description="Recent trade data isn't reachable right now."
+        />
       ) : (
         <>
           <div className="overflow-auto max-h-[420px]">
-            <table className="w-full min-w-[680px]">
+            <table className="w-full min-w-[720px]">
               <thead className="sticky top-0 z-10 bg-bg-surface/95 backdrop-blur-md">
                 <tr className="border-b border-border-subtle">
-                  {COLS.map((h, i) => (
-                    <th
-                      key={h}
-                      className={`table-head py-2.5 px-3 ${i < 3 ? "text-left" : "text-right"}`}
-                    >
-                      {h}
-                    </th>
-                  ))}
+                  {COLS.map((c) => {
+                    const isSortable = c.sortKey != null;
+                    const isActive = c.sortKey != null && sortKey === c.sortKey;
+                    return (
+                      <th
+                        key={c.key}
+                        className={`table-head py-2.5 px-3 ${c.align === "right" ? "text-right" : "text-left"} ${
+                          isSortable ? "table-head--sortable" : ""
+                        }`}
+                        data-active={isActive || undefined}
+                        data-dir={isActive ? sortDir : undefined}
+                        onClick={isSortable ? () => handleSort(c.sortKey!) : undefined}
+                      >
+                        {c.label}
+                        {isSortable && isActive && <span className="sort-arrow">▼</span>}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border-subtle">
+              <tbody>
                 {isLoading && trades.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-[12px] text-text-disabled">
+                    <td colSpan={COLS.length} className="py-12 text-center text-[12px] text-text-disabled">
                       Loading…
                     </td>
                   </tr>
                 ) : trades.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-[12px] text-text-disabled">
+                    <td colSpan={COLS.length} className="py-12 text-center text-[12px] text-text-disabled">
                       No trades in the last 24 hours
                     </td>
                   </tr>
                 ) : (
                   trades.map((t) => {
-                    const st = STATUS[t.status] ?? {
-                      label: t.status,
-                      className: "text-text-disabled bg-white/[0.03]",
-                    };
                     const { value: pnl, isUnrealized } = legPnl(t, unrealizedByLeg);
                     const ts = tradeTime(t);
-
                     return (
-                      <tr key={`${t.opportunityId}-${t.venue}-${t.side}`} className="row-hover">
+                      <tr
+                        key={`${t.opportunityId}-${t.venue}-${t.side}`}
+                        className="row-zebra"
+                      >
                         <td className="tabular-mono py-2.5 px-3 text-[11px] text-text-disabled">
                           <span title={new Date(ts).toLocaleString()}>
                             {formatRelativeTime(ts)}
@@ -135,8 +194,13 @@ export function TradeHistory() {
                             <span className="block text-[10px] text-text-disabled/70">closed</span>
                           )}
                         </td>
-                        <td className="tabular-mono py-2.5 px-3 text-[11px] text-text-secondary font-medium">
-                          {t.asset.replace("-PERP", "")}
+                        <td className="py-2.5 px-3">
+                          <span className="flex items-center gap-1.5">
+                            <AssetIcon asset={t.asset} size={16} />
+                            <span className="tabular-mono text-[11px] text-text-secondary font-medium">
+                              {t.asset.replace("-PERP", "")}
+                            </span>
+                          </span>
                         </td>
                         <td className="py-2.5 px-3">
                           <span className="flex items-center gap-1.5">
@@ -173,10 +237,8 @@ export function TradeHistory() {
                           {isUnrealized && <span className="text-text-disabled font-normal"> ~</span>}
                         </td>
                         <td className="text-right py-2.5 px-3">
-                          <span
-                            className={`inline-block text-[10px] font-medium px-2 py-0.5 rounded-md ${st.className}`}
-                          >
-                            {st.label}
+                          <span className="status-tag" data-status={t.status}>
+                            {t.status === "simulated" ? "sim" : t.status}
                           </span>
                         </td>
                       </tr>
