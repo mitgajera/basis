@@ -1,25 +1,34 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, DM_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const sans = Bricolage_Grotesque({
+const sans = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
   display: "swap",
 });
 
-const mono = DM_Mono({
+const mono = JetBrains_Mono({
   subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: ["400", "500", "600"],
   variable: "--font-mono",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "basis.",
-  description: "Cross-venue funding-rate yield. Delta-neutral by construction.",
+  title: {
+    default: "basis. | cross-venue funding rate vault",
+    template: "%s · basis.",
+  },
+  description: "Delta-neutral funding-rate yield on Solana. Cross-venue spreads, hedged in real time.",
+  openGraph: {
+    title: "basis.",
+    description: "Delta-neutral funding-rate yield on Solana.",
+    type: "website",
+  },
+  twitter: { card: "summary_large_image", title: "basis.", description: "Delta-neutral funding-rate yield on Solana." },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
